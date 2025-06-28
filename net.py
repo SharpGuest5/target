@@ -11,7 +11,7 @@ import time
 class PortScannerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("网络安全检测系统 - 端口扫描")
+        self.root.title("网络安全检测系统 - 端口扫描模块")
         self.root.geometry("1000x700")
         self.root.configure(bg="#f5f7ff")
         self.root.resizable(True, True)
@@ -120,15 +120,15 @@ class PortScannerApp:
         header_frame = tk.Frame(main_frame, bg="#f5f7ff")
         header_frame.pack(fill=tk.X, pady=(0, 15))
 
-        title_label = ttk.Label(header_frame, text="端口扫描模块", style="Title.TLabel")
+        title_label = ttk.Label(header_frame, text="基于TCP三次握手的端口扫描系统", style="Title.TLabel")
         title_label.pack(side=tk.LEFT, anchor="nw")
 
         subtitle_label = ttk.Label(header_frame,
-                                   text="检测目标系统的开放端口和服务",
+                                   text="通过TCP三次握手检测目标系统的开放端口",
                                    style="Subtitle.TLabel")
         subtitle_label.pack(side=tk.LEFT, anchor="nw", padx=10, pady=(10, 0))
 
-        # 主内容区域 - 使用Frame和pack_propagate
+        # 主内容区域
         content_frame = tk.Frame(main_frame, bg="#f5f7ff")
         content_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -261,7 +261,7 @@ class PortScannerApp:
                                command=self.clear_port_list)
         clear_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # 扫描设置卡片 - 确保在可见位置
+        # 扫描设置卡片
         settings_card = ttk.Frame(scrollable_frame, style="Card.TFrame")
         settings_card.pack(fill=tk.X, padx=5, pady=(0, 15), ipadx=10, ipady=10)
 
@@ -269,11 +269,11 @@ class PortScannerApp:
                                font=("Segoe UI", 11, "bold"))
         card_title.pack(anchor=tk.W, pady=(0, 10))
 
-        # 超时设置
+        # TCP连接超时设置
         timeout_frame = tk.Frame(settings_card, bg="#ffffff")
         timeout_frame.pack(fill=tk.X, pady=5)
 
-        timeout_label = ttk.Label(timeout_frame, text="连接超时(秒):", style="Label.TLabel")
+        timeout_label = ttk.Label(timeout_frame, text="TCP连接超时(秒):", style="Label.TLabel")
         timeout_label.pack(anchor=tk.W, padx=5)
 
         self.timeout_var = tk.DoubleVar(value=0.5)
@@ -293,7 +293,7 @@ class PortScannerApp:
                                   textvariable=self.thread_var, width=8)
         thread_spin.pack(anchor=tk.W, padx=5, pady=5)
 
-        # 扫描按钮 - 确保在可见位置
+        # 扫描按钮
         scan_frame = tk.Frame(settings_card, bg="#ffffff")
         scan_frame.pack(fill=tk.X, pady=10)
 
@@ -351,6 +351,16 @@ class PortScannerApp:
         self.result_text.tag_config("open", foreground="#000000")
         self.result_text.tag_config("closed", foreground="#000000")
         self.result_text.tag_config("summary", foreground="#000000", font=("Segoe UI", 10, "bold"))
+
+        # 技术说明区域
+        info_frame = tk.Frame(result_card, bg="#ffffff")
+        info_frame.pack(fill=tk.X, pady=(10, 0))
+
+        info_label = ttk.Label(info_frame,
+                               text="技术原理: 基于TCP三次握手进行端口扫描",
+                               style="Label.TLabel",
+                               foreground="#3498db")
+        info_label.pack(anchor=tk.W)
 
         # 状态栏
         status_bar = tk.Frame(self.root, bg="#2c3e50", height=24)
@@ -532,7 +542,10 @@ class PortScannerApp:
         scan_thread.start()
 
     def scan_ports(self, target, ports, timeout, max_threads):
-        """扫描端口的线程函数"""
+        """
+        基于TCP三次握手的端口扫描函数
+        通过尝试建立TCP连接来检测端口开放状态
+        """
         open_ports = []
         start_time = datetime.now()
         total_ports = len(ports)
@@ -544,15 +557,31 @@ class PortScannerApp:
             while port_queue and not self.stop_scan:
                 port = port_queue.pop(0)
                 try:
+                    # 创建TCP socket
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        # 设置连接超时
                         s.settimeout(timeout)
+
+                        # 尝试建立TCP连接（完成三次握手）
                         result = s.connect_ex((target, port))
+
+                        # 如果连接成功（三次握手完成）
                         if result == 0:
                             open_ports.append(port)
-                            # 更新UI
+                            # 更新UI显示开放端口
                             self.root.after(0, self.update_result, port, "开放")
-                except:
-                    pass
+
+                            # 关闭连接（发送FIN包）
+                            s.shutdown(socket.SHUT_RDWR)
+                        else:
+                            # 更新UI显示关闭端口
+                            self.root.after(0, self.update_result, port, "关闭")
+                except socket.timeout:
+                    # 连接超时，端口可能关闭或过滤
+                    self.root.after(0, self.update_result, port, "超时")
+                except Exception as e:
+                    # 其他异常
+                    self.root.after(0, self.update_result, port, f"错误: {str(e)}")
 
                 # 更新计数
                 scanned_ports += 1
@@ -600,13 +629,21 @@ class PortScannerApp:
         except:
             service = "未知服务"
 
-        # 添加结果
+        # 根据状态添加不同颜色的结果
         if status == "开放":
             result_line = f"[✓] 端口 {port:<5} 开放 | 服务: {service}\n"
             self.result_text.insert(tk.END, result_line, "open")
-        else:
+        elif status == "关闭":
             result_line = f"[✗] 端口 {port:<5} 关闭\n"
             self.result_text.insert(tk.END, result_line, "closed")
+        elif "超时" in status:
+            result_line = f"[⌛] 端口 {port:<5} 连接超时\n"
+            self.result_text.tag_config("timeout", foreground="#f39c12")
+            self.result_text.insert(tk.END, result_line, "timeout")
+        else:
+            result_line = f"[⚠] 端口 {port:<5} {status}\n"
+            self.result_text.tag_config("error", foreground="#e74c3c")
+            self.result_text.insert(tk.END, result_line, "error")
 
         # 自动滚动到底部
         self.result_text.see(tk.END)
