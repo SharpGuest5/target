@@ -6,12 +6,12 @@ class LoginApp:
     def __init__(self, root):
         self.root = root
         self.root.title("登录系统")
-        self.root.geometry("300x200")
+        self.root.geometry("350x220")  # 稍微加宽以适应新按钮
         self.root.resizable(False, False)
 
         # 设置界面居中
-        window_width = 300
-        window_height = 200
+        window_width = 350
+        window_height = 220
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
         x = int((screen_width / 2) - (window_width / 2))
@@ -21,12 +21,21 @@ class LoginApp:
         # 创建界面元素
         self.create_widgets()
 
-        # 预设的账号密码（实际应用中应从数据库读取）
+        # 预设的账号密码
         self.valid_credentials = {
             "admin": "admin123",
             "user": "password123",
             "test": "test123"
         }
+
+        # 记住密码
+        self.remember_var = tk.BooleanVar()
+        self.remember_check = tk.Checkbutton(
+            self.button_frame,
+            text="记住密码",
+            variable=self.remember_var
+        )
+        self.remember_check.pack(pady=5)
 
     def create_widgets(self):
         # 标题标签
@@ -39,7 +48,7 @@ class LoginApp:
 
         # 账号框架
         self.username_frame = tk.Frame(self.root)
-        self.username_frame.pack(fill="x", padx=20, pady=5)
+        self.username_frame.pack(fill="x", padx=30, pady=5)
 
         self.username_label = tk.Label(
             self.username_frame,
@@ -58,7 +67,7 @@ class LoginApp:
 
         # 密码框架
         self.password_frame = tk.Frame(self.root)
-        self.password_frame.pack(fill="x", padx=20, pady=5)
+        self.password_frame.pack(fill="x", padx=30, pady=5)
 
         self.password_label = tk.Label(
             self.password_frame,
@@ -75,6 +84,16 @@ class LoginApp:
         )
         self.password_entry.pack(side="left", padx=5)
 
+        # 添加显示/隐藏密码按钮
+        self.show_pass_btn = tk.Button(
+            self.password_frame,
+            text="显示",
+            width=4,
+            command=self.toggle_password
+        )
+        self.show_pass_btn.pack(side="left", padx=(0, 0))
+        self.password_hidden = True  # 初始状态为隐藏密码
+
         # 登录按钮框架
         self.button_frame = tk.Frame(self.root)
         self.button_frame.pack(pady=15)
@@ -90,6 +109,17 @@ class LoginApp:
         # 绑定回车键
         self.root.bind('<Return>', lambda event: self.attempt_login())
 
+    def toggle_password(self):
+        """切换密码显示/隐藏状态"""
+        if self.password_hidden:
+            self.password_entry.config(show="")
+            self.show_pass_btn.config(text="隐藏")
+            self.password_hidden = False
+        else:
+            self.password_entry.config(show="*")
+            self.show_pass_btn.config(text="显示")
+            self.password_hidden = True
+
     def attempt_login(self):
         username = self.username_entry.get()
         password = self.password_entry.get()
@@ -101,7 +131,7 @@ class LoginApp:
         # 验证账号密码
         if username in self.valid_credentials and password == self.valid_credentials[username]:
             messagebox.showinfo("登录成功", f"欢迎回来, {username}!")
-            # 这里可以添加登录成功后的操作，比如打开主界面
+            # 这里添加登录成功后的操作
         else:
             messagebox.showerror("登录失败", "账号或密码错误")
             self.password_entry.delete(0, tk.END)  # 清空密码框
