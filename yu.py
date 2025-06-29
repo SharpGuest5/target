@@ -342,8 +342,17 @@ HTML_TEMPLATE = """
          .text-white {
             color: white !important;
         }
-        .form-text.text-white {
-            opacity: 0.7;
+        .card .form-text {
+            color: #bbb !important;
+            opacity: 1 !important;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        .form-control {
+           color: #fff !important;
+           background: rgba(0, 0, 0, 0.3) !important;
+           border: 1px solid rgba(255, 255, 255, 0.2);
         }
     </style>
 </head>
@@ -365,13 +374,13 @@ HTML_TEMPLATE = """
             <!-- 域名扫描模块 -->
             <div class="col-md-6">
                 <div class="card">
-                    <div class="card-header">
-                        <i class="fas fa-search me-2"></i>域名扫描
+                    <div class="card-header text-white bg-dark">
+                         <i class="fas fa-search me-2"></i>域名扫描
                     </div>
                     <div class="card-body">
                         <p class="text-white">扫描目标域名的所有子域名，识别潜在的攻击面</p>
                         <div class="mb-3">
-                            <label class="form-label">目标域名</label>
+                            <label class="form-label text-white fw-bold">目标域名</label>
                             <div class="input-group">
                                 <input type="text" class="form-control form-control-lg" id="domainInput" placeholder="example.com">
                                 <button class="btn btn-outline-secondary" type="button" onclick="fillExample('domain')">
@@ -395,21 +404,21 @@ HTML_TEMPLATE = """
                         <div class="system-stats">
                             <div class="row">
                                 <div class="col-4">
-                                    <div class="text-center">
-                                        <div class="fs-4" id="subdomainCount">0</div>
-                                        <div class="text-muted">子域名</div>
-                                    </div>
+                                   <div class="text-center">
+                                        <div class="fs-4 text-primary fw-bold" id="subdomainCount">0</div>
+                                        <div class="text-dark fw-bold">子域名</div>
+                                   </div>
                                 </div>
                                 <div class="col-4">
                                     <div class="text-center">
-                                        <div class="fs-4" id="scanTime">0s</div>
-                                        <div class="text-muted">扫描用时</div>
-                                    </div>
+                                        <div class="fs-4 text-primary fw-bold" id="scanTime">0s</div>
+                                        <div class="text-dark fw-bold">扫描用时</div>
+                                     </div>
                                 </div>
                                 <div class="col-4">
                                     <div class="text-center">
-                                        <div class="fs-4" id="threadCount">40</div>
-                                        <div class="text-muted">线程数</div>
+                                        <div class="fs-4 text-primary fw-bold" id="scanTime">0s</div>
+                                        <div class="text-dark fw-bold">扫描用时</div>
                                     </div>
                                 </div>
                             </div>
@@ -421,13 +430,13 @@ HTML_TEMPLATE = """
             <!-- IP查询模块 -->
             <div class="col-md-6">
                 <div class="card">
-                    <div class="card-header">
+                    <div class="card-header text-white bg-dark">
                         <i class="fas fa-map-marker-alt me-2"></i>IP地理位置查询
                     </div>
                     <div class="card-body">
                         <p class="text-white">查询IP地址的详细地理位置和网络信息</p>
                         <div class="mb-3">
-                            <label class="form-label">IP地址</label>
+                            <label class="form-label text-white fw-bold">IP地址</label>
                             <div class="input-group">
                                 <input type="text" class="form-control form-control-lg" id="ipInput" placeholder="8.8.8.8">
                                 <button class="btn btn-outline-secondary" type="button" onclick="fillExample('ip')">
@@ -442,7 +451,7 @@ HTML_TEMPLATE = """
 
                         <div class="ip-detail-box" id="ipDetails" style="display: none;">
                             <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>IP详细信息</h5>
+                                <h5 class="mb-0 text-white fw-bold"><i class="fas fa-info-circle me-2"></i>IP详细信息</h5>
                                 <span class="badge bg-primary" id="ip-status">成功</span>
                             </div>
 
@@ -450,44 +459,44 @@ HTML_TEMPLATE = """
                                 <div class="col-md-6">
                                     <div class="mb-2 d-flex">
                                         <span class="ip-detail-label">国家:</span> 
-                                        <span id="ip-country">--</span>
+                                        <span id="ip-country" class="text-white">--</span>
                                     </div>
                                     <div class="mb-2 d-flex">
                                         <span class="ip-detail-label">地区:</span> 
-                                        <span id="ip-region">--</span>
+                                        <span id="ip-region" class="text-white">--</span>
                                     </div>
                                     <div class="mb-2 d-flex">
                                         <span class="ip-detail-label">城市:</span> 
-                                        <span id="ip-city">--</span>
+                                        <span id="ip-city" class="text-white">--</span>
                                     </div>
                                     <div class="mb-2 d-flex">
                                         <span class="ip-detail-label">邮政编码:</span> 
-                                        <span id="ip-zip">--</span>
+                                        <span id="ip-zip" class="text-white">--</span>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
                                     <div class="mb-2 d-flex">
                                         <span class="ip-detail-label">ISP:</span> 
-                                        <span id="ip-isp">--</span>
+                                        <span id="ip-isp" class="text-white">--</span>
                                     </div>
                                     <div class="mb-2 d-flex">
                                         <span class="ip-detail-label">组织:</span> 
-                                        <span id="ip-org">--</span>
+                                        <span id="ip-org" class="text-white">--</span>
                                     </div>
                                     <div class="mb-2 d-flex">
                                         <span class="ip-detail-label">AS编号:</span> 
-                                        <span id="ip-as">--</span>
+                                        <span id="ip-as" class="text-white">--</span>
                                     </div>
                                     <div class="mb-2 d-flex">
                                         <span class="ip-detail-label">时区:</span> 
-                                        <span id="ip-timezone">--</span>
+                                        <span id="ip-timezone" class="text-white">--</span>
                                     </div>
                                 </div>
                             </div>
                             <div class="mt-3">
                                 <div class="d-flex">
                                     <span class="ip-detail-label">坐标:</span>
-                                    <span id="ip-latlon">--</span>
+                                    <span id="ip-latlon" class="text-white">--</span>
                                     <span class="ms-2 copy-btn" onclick="copyToClipboard('ip-latlon')">
                                         <i class="fas fa-copy" title="复制坐标"></i>
                                     </span>
@@ -506,7 +515,7 @@ HTML_TEMPLATE = """
         <div class="card mt-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <div>
-                    <i class="fas fa-list me-2"></i>扫描结果: <span id="resultDomain">--</span>
+                    <i class="fas fa-list me-2 text-white"> 扫描结果</i> <span id="resultDomain">--</span>
                 </div>
                 <div>
                     <span class="badge bg-success me-2 dark-badge" id="onlineCount">在线: 0</span>
@@ -527,7 +536,7 @@ HTML_TEMPLATE = """
                         </thead>
                         <tbody id="resultsBody">
                             <tr>
-                                <td colspan="5" class="text-center">等待扫描结果...</td>
+                                <td colspan="5" class="text-center text-white">等待扫描结果...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -730,13 +739,15 @@ HTML_TEMPLATE = """
                     document.getElementById('ip-latlon').textContent = 
                         `${details.lat}, ${details.lon}`;
 
-                    // 生成地图预览链接
-                    const mapUrl = `https://maps.google.com/maps?q=${details.lat},${details.lon}&z=10`;
+                    // 生成高德地图预览链接
+                    const mapUrl = `https://uri.amap.com/marker?position=${details.lon},${details.lat}&name=IP位置&callnative=0`;
+
                     document.getElementById('ipMap').innerHTML = `
                         <a href="${mapUrl}" target="_blank" class="btn btn-primary">
                             <i class="fas fa-map-marked-alt me-2"></i>查看地图
                         </a>
                     `;
+
                 } else {
                     document.getElementById('ip-latlon').textContent = '--';
                     document.getElementById('ipMap').innerHTML = '<i class="fas fa-map-marked-alt me-2"></i>无坐标数据';
