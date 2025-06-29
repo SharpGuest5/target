@@ -3,6 +3,8 @@ from tkinter import messagebox, ttk
 import json
 import os
 import hashlib
+import subprocess  # 用于运行外部模块
+import sys  # 用于获取当前文件路径
 
 
 class UserSystem:
@@ -80,6 +82,7 @@ class LoginApp:
     def __init__(self, root):
         self.root = root
         self.root.title("登录系统")
+        self.current_process = None  # 存储当前运行的子进程
 
         # 设置最小窗口尺寸
         self.root.minsize(400, 300)
@@ -367,7 +370,9 @@ class LoginApp:
         success, username, email = UserSystem.authenticate(identifier, password)
 
         if success:
-            messagebox.showinfo("登录成功", f"欢迎回来, {username}!")
+            # 登录成功后显示主功能界面
+            self.show_main_menu(username)
+
             # 记住密码功能
             if self.remember_var.get():
                 # 实际应用中应安全存储
@@ -375,6 +380,144 @@ class LoginApp:
         else:
             messagebox.showerror("登录失败", "账号/邮箱或密码错误")
             self.password_entry.delete(0, tk.END)  # 清空密码框
+
+    def show_main_menu(self, username):
+        """显示主功能菜单界面"""
+        # 清除主框架内容
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+
+        # 更新窗口标题
+        self.root.title(f"安全工具箱 - 欢迎 {username}")
+
+        # 配置主框架网格
+        self.main_frame.grid_rowconfigure(0, weight=0)  # 欢迎信息
+        self.main_frame.grid_rowconfigure(1, weight=0)  # 分隔线
+        self.main_frame.grid_rowconfigure(2, weight=0)  # 模块标题
+        self.main_frame.grid_rowconfigure(3, weight=1)  # 模块按钮区域
+        self.main_frame.grid_rowconfigure(4, weight=0)  # 底部按钮
+        self.main_frame.grid_columnconfigure(0, weight=1)  # 左侧空白
+        self.main_frame.grid_columnconfigure(1, weight=0)  # 内容列
+        self.main_frame.grid_columnconfigure(2, weight=1)  # 右侧空白
+
+        # 欢迎信息
+        welcome_label = ttk.Label(
+            self.main_frame,
+            text=f"欢迎回来, {username}!",
+            font=("Microsoft YaHei", 14, "bold"),
+            foreground="#4A90E2"
+        )
+        welcome_label.grid(row=0, column=1, pady=(20, 10), sticky="n")
+
+        # 分隔线
+        ttk.Separator(self.main_frame, orient="horizontal").grid(
+            row=1, column=1, sticky="ew", pady=10, padx=20
+        )
+
+        # 模块标题
+        module_title = ttk.Label(
+            self.main_frame,
+            text="安全工具模块",
+            font=("Microsoft YaHei", 12, "bold")
+        )
+        module_title.grid(row=2, column=1, pady=(10, 20))
+
+        # 模块按钮框架
+        button_frame = ttk.Frame(self.main_frame)
+        button_frame.grid(row=3, column=1, sticky="nsew")
+
+        # 配置按钮框架网格
+        for i in range(4):  # 4行按钮
+            button_frame.grid_rowconfigure(i, weight=1, pad=10)
+        for i in range(3):  # 3列按钮
+            button_frame.grid_columnconfigure(i, weight=1, pad=15)
+
+        # 创建模块按钮
+        modules = [
+            {"name": "域名检测", "command": self.run_domain_detection, "icon": "🌐"},
+            {"name": "端口扫描", "command": lambda: self.show_module_message("端口扫描"), "icon": "🔍"},
+            {"name": "漏洞扫描", "command": lambda: self.show_module_message("漏洞扫描"), "icon": "🛡️"},
+            {"name": "日志分析", "command": lambda: self.show_module_message("日志分析"), "icon": "📊"},
+            {"name": "网络监控", "command": lambda: self.show_module_message("网络监控"), "icon": "📶"},
+            {"name": "加密工具", "command": lambda: self.show_module_message("加密工具"), "icon": "🔒"},
+        ]
+
+        # 添加按钮到界面
+        for i, module in enumerate(modules):
+            row = i // 3
+            col = i % 3
+
+            btn = tk.Button(
+                button_frame,
+                text=f"{module['icon']} {module['name']}",
+                font=("Microsoft YaHei", 11),
+                bg="#4A90E2",
+                fg="white",
+                relief="flat",
+                padx=20,
+                pady=15,
+                command=module["command"],
+                cursor="hand2"
+            )
+            btn.grid(row=row, column=col, sticky="nsew", padx=5, pady=5)
+
+            # 添加悬停效果
+            btn.bind("<Enter>", lambda e, b=btn: b.config(bg="#357ABD"))
+            btn.bind("<Leave>", lambda e, b=btn: b.config(bg="#4A90E2"))
+
+        # 底部按钮区域
+        bottom_frame = ttk.Frame(self.main_frame)
+        bottom_frame.grid(row=4, column=1, sticky="ew", pady=(30, 20))
+        bottom_frame.grid_columnconfigure(0, weight=1)
+        bottom_frame.grid_columnconfigure(1, weight=0)
+        bottom_frame.grid_columnconfigure(2, weight=1)
+
+        # 注销按钮
+        logout_btn = ttk.Button(
+            bottom_frame,
+            text="注销",
+            width=10,
+            command=self.create_login_ui
+        )
+        logout_btn.grid(row=0, column=1, padx=10)
+
+        # 退出按钮
+        exit_btn = ttk.Button(
+            bottom_frame,
+            text="退出系统",
+            width=10,
+            command=self.root.destroy
+        )
+        exit_btn.grid(row=0, column=1, padx=10, pady=(10, 0))
+
+    def run_domain_detection(self):
+        """运行域名检测模块"""
+        try:
+            # 获取当前脚本所在目录
+            current_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+            domain_detection_path = os.path.join(current_dir, "DomainDetection.py")
+
+            # 检查文件是否存在
+            if not os.path.exists(domain_detection_path):
+                messagebox.showerror("错误", f"找不到模块文件: {domain_detection_path}")
+                return
+
+            # 终止当前运行的进程（如果有）
+            if self.current_process:
+                try:
+                    self.current_process.terminate()
+                except:
+                    pass
+
+            # 使用子进程运行模块
+            self.current_process = subprocess.Popen([sys.executable, domain_detection_path])
+            messagebox.showinfo("启动成功", "域名检测模块已启动，请查看控制台窗口")
+        except Exception as e:
+            messagebox.showerror("错误", f"启动模块失败: {str(e)}")
+
+    def show_module_message(self, module_name):
+        """显示模块信息（用于未实现的模块）"""
+        messagebox.showinfo("模块信息", f"{module_name}模块正在开发中，敬请期待！")
 
     def attempt_register(self):
         """尝试注册"""
