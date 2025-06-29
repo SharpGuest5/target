@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 import socket
 import threading
 import ipaddress
@@ -7,32 +7,40 @@ import re
 from datetime import datetime
 import time
 import select
+import os
+import struct
+import platform
+import random
 
 
 class PortScannerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("网络安全检测系统 - 端口扫描模块")
-        self.root.geometry("1000x700")
+        self.root.title("高级网络安全扫描器")
+        self.root.geometry("1100x750")
         self.root.configure(bg="#f5f7ff")
         self.root.resizable(True, True)
-
-        # 设置应用样式
-        self.set_styles()
-
-        # 创建界面
-        self.create_widgets()
 
         # 扫描状态
         self.scanning = False
         self.stop_scan = False
         self.progress_value = 0
         self.last_update = 0
+        self.host_discovery_enabled = True
+        self.service_version_detection = False
+        self.os_detection = False
+        self.current_scan_type = "TCP Connect"
+
+        # 创建界面
+        self.create_widgets()
 
         # 设置初始值
         self.target_entry.insert(0, "127.0.0.1")
-        self.port_entry.insert(0, "80")
-        self.scan_type_var.set("TCP Connect")  # 默认扫描类型
+        self.port_entry.insert(0, "1-1024")
+        self.scan_type_var.set("TCP Connect")
+        self.host_discovery_var.set(1)  # 默认启用主机发现
+        self.service_version_var.set(0)  # 默认禁用服务版本探测
+        self.os_detection_var.set(0)  # 默认禁用OS探测
 
     def set_styles(self):
         # 自定义样式
@@ -122,11 +130,11 @@ class PortScannerApp:
         header_frame = tk.Frame(main_frame, bg="#f5f7ff")
         header_frame.pack(fill=tk.X, pady=(0, 15))
 
-        title_label = ttk.Label(header_frame, text="端口扫描", style="Title.TLabel")
+        title_label = ttk.Label(header_frame, text="高级端口扫描器", style="Title.TLabel")
         title_label.pack(side=tk.LEFT, anchor="nw")
 
         subtitle_label = ttk.Label(header_frame,
-                                   text="通过多种扫描技术检测目标系统的开放端口",
+                                   text="支持多种扫描技术、主机发现、服务版本探测和操作系统识别",
                                    style="Subtitle.TLabel")
         subtitle_label.pack(side=tk.LEFT, anchor="nw", padx=10, pady=(10, 0))
 
@@ -172,12 +180,28 @@ class PortScannerApp:
 
         self.target_entry = ttk.Entry(target_form, style="Entry.TEntry")
         self.target_entry.pack(fill=tk.X, padx=5, pady=5, ipady=5)
+        self.target_entry.insert(0, "127.0.0.1")
+
+        tip_label = ttk.Label(target_form, text="支持IP、域名、CIDR网段(192.168.1.0/24)或逗号分隔",
+                              style="Label.TLabel", font=("Segoe UI", 8))
+        tip_label.pack(anchor=tk.W, padx=5, pady=(0, 5))
+
+        # 主机发现设置
+        discovery_frame = tk.Frame(target_card, bg="#ffffff")
+        discovery_frame.pack(fill=tk.X, pady=5)
+
+        self.host_discovery_var = tk.IntVar(value=1)
+        host_discovery_check = ttk.Checkbutton(discovery_frame,
+                                               text="启用主机发现 (Ping扫描)",
+                                               variable=self.host_discovery_var,
+                                               style="Label.TLabel")
+        host_discovery_check.pack(anchor=tk.W, padx=5, pady=5)
 
         # 端口管理卡片
         port_card = ttk.Frame(scrollable_frame, style="Card.TFrame")
         port_card.pack(fill=tk.X, pady=(0, 15), padx=5, ipadx=10, ipady=10)
 
-        card_title = ttk.Label(port_card, text="端口管理", style="Label.TLabel",
+        card_title = ttk.Label(port_card, text="端口设置", style="Label.TLabel",
                                font=("Segoe UI", 11, "bold"))
         card_title.pack(anchor=tk.W, pady=(0, 10))
 
@@ -185,83 +209,36 @@ class PortScannerApp:
         port_form = tk.Frame(port_card, bg="#ffffff")
         port_form.pack(fill=tk.X, pady=5)
 
-        port_label = ttk.Label(port_form, text="添加端口:", style="Label.TLabel")
+        port_label = ttk.Label(port_form, text="扫描端口:", style="Label.TLabel")
         port_label.pack(anchor=tk.W, padx=5)
 
         self.port_entry = ttk.Entry(port_form, style="Entry.TEntry")
         self.port_entry.pack(fill=tk.X, padx=5, pady=5, ipady=5)
+        self.port_entry.insert(0, "1-1024")
 
-        # 按钮组
-        btn_frame = tk.Frame(port_form, bg="#ffffff")
-        btn_frame.pack(fill=tk.X, pady=10)
+        tip_label = ttk.Label(port_form, text="支持单个端口(80)、范围(1-100)、逗号分隔(80,443,8080)",
+                              style="Label.TLabel", font=("Segoe UI", 8))
+        tip_label.pack(anchor=tk.W, padx=5, pady=(0, 5))
 
-        add_port_btn = ttk.Button(btn_frame, text="添加单个端口",
-                                  style="Primary.TButton",
-                                  command=self.add_single_port)
-        add_port_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        # 预设端口按钮
+        preset_btn_frame = tk.Frame(port_card, bg="#ffffff")
+        preset_btn_frame.pack(fill=tk.X, pady=5)
 
-        add_range_btn = ttk.Button(btn_frame, text="添加范围",
-                                   style="Primary.TButton",
-                                   command=self.add_port_range)
-        add_range_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        top_btn = ttk.Button(preset_btn_frame, text="常用端口",
+                             style="Primary.TButton",
+                             command=lambda: self.set_preset_ports("common"))
+        top_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
-        # 常用端口按钮
-        common_btn_frame = tk.Frame(port_card, bg="#ffffff")
-        common_btn_frame.pack(fill=tk.X, pady=5)
+        # 修正了这里的拼写错误：ttt -> ttk
+        web_btn = ttk.Button(preset_btn_frame, text="Web服务",
+                             style="Primary.TButton",
+                             command=lambda: self.set_preset_ports("web"))
+        web_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
-        common_btn = ttk.Button(common_btn_frame, text="添加常用端口",
-                                style="Success.TButton",
-                                command=self.add_common_ports)
-        common_btn.pack(fill=tk.X, pady=(0, 10))
-
-        # 端口列表
-        list_frame = tk.Frame(port_card, bg="#ffffff")
-        list_frame.pack(fill=tk.X, pady=5)
-
-        list_label = ttk.Label(list_frame, text="扫描端口列表:", style="Label.TLabel")
-        list_label.pack(anchor=tk.W, pady=(0, 5))
-
-        # 端口列表框
-        port_list_frame = tk.Frame(list_frame, bg="#ffffff")
-        port_list_frame.pack(fill=tk.X)
-
-        # 创建滚动条
-        scrollbar = ttk.Scrollbar(port_list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.port_listbox = tk.Listbox(port_list_frame,
-                                       height=8,
-                                       font=("Segoe UI", 9),
-                                       foreground="#000000",
-                                       selectbackground="#3498db",
-                                       selectforeground="#ffffff",
-                                       activestyle="none",
-                                       highlightthickness=1,
-                                       highlightcolor="#3498db",
-                                       highlightbackground="#bdc3c7",
-                                       yscrollcommand=scrollbar.set)
-        self.port_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=5)
-
-        scrollbar.config(command=self.port_listbox.yview)
-
-        # 添加默认端口
-        common_ports = [21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 8080, 8443]
-        for port in common_ports:
-            self.port_listbox.insert(tk.END, port)
-
-        # 列表按钮
-        list_btn_frame = tk.Frame(list_frame, bg="#ffffff")
-        list_btn_frame.pack(fill=tk.X, pady=5)
-
-        remove_btn = ttk.Button(list_btn_frame, text="删除选中",
-                                style="Danger.TButton",
-                                command=self.remove_selected_ports)
-        remove_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-
-        clear_btn = ttk.Button(list_btn_frame, text="清空列表",
-                               style="Danger.TButton",
-                               command=self.clear_port_list)
-        clear_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        full_btn = ttk.Button(preset_btn_frame, text="全端口",
+                              style="Primary.TButton",
+                              command=lambda: self.set_preset_ports("full"))
+        full_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # 扫描设置卡片
         settings_card = ttk.Frame(scrollable_frame, style="Card.TFrame")
@@ -280,13 +257,32 @@ class PortScannerApp:
 
         # 扫描类型下拉菜单
         self.scan_type_var = tk.StringVar()
+        scan_types = ["TCP Connect", "TCP SYN", "TCP FIN", "UDP", "快速扫描", "全面扫描"]
         scan_type_combo = ttk.Combobox(scan_type_frame,
                                        textvariable=self.scan_type_var,
-                                       values=["TCP Connect", "TCP SYN", "TCP FIN", "UDP"],
+                                       values=scan_types,
                                        state="readonly",
                                        width=15)
         scan_type_combo.pack(anchor=tk.W, padx=5, pady=5)
         self.scan_type_var.set("TCP Connect")  # 设置默认值
+
+        # 高级选项
+        advanced_frame = tk.Frame(settings_card, bg="#ffffff")
+        advanced_frame.pack(fill=tk.X, pady=5)
+
+        self.service_version_var = tk.IntVar(value=0)
+        service_check = ttk.Checkbutton(advanced_frame,
+                                        text="服务版本探测",
+                                        variable=self.service_version_var,
+                                        style="Label.TLabel")
+        service_check.pack(anchor=tk.W, padx=5, pady=5)
+
+        self.os_detection_var = tk.IntVar(value=0)
+        os_check = ttk.Checkbutton(advanced_frame,
+                                   text="操作系统探测",
+                                   variable=self.os_detection_var,
+                                   style="Label.TLabel")
+        os_check.pack(anchor=tk.W, padx=5, pady=5)
 
         # TCP连接超时设置
         timeout_frame = tk.Frame(settings_card, bg="#ffffff")
@@ -316,10 +312,18 @@ class PortScannerApp:
         scan_frame = tk.Frame(settings_card, bg="#ffffff")
         scan_frame.pack(fill=tk.X, pady=10)
 
-        self.scan_btn = ttk.Button(scan_frame, text="开始扫描",
+        btn_frame = tk.Frame(scan_frame, bg="#ffffff")
+        btn_frame.pack(fill=tk.X)
+
+        self.scan_btn = ttk.Button(btn_frame, text="开始扫描",
                                    style="Success.TButton",
                                    command=self.start_scan)
-        self.scan_btn.pack(fill=tk.X)
+        self.scan_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        self.export_btn = ttk.Button(btn_frame, text="导出结果",
+                                     style="Primary.TButton",
+                                     command=self.export_results)
+        self.export_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # 右侧结果面板
         result_frame = tk.Frame(content_frame, bg="#f5f7ff")
@@ -367,11 +371,14 @@ class PortScannerApp:
         self.result_text.config(state=tk.DISABLED)
 
         # 配置文本标签
-        self.result_text.tag_config("open", foreground="#000000")
-        self.result_text.tag_config("closed", foreground="#000000")
-        self.result_text.tag_config("summary", foreground="#000000", font=("Segoe UI", 10, "bold"))
+        self.result_text.tag_config("open", foreground="#27ae60")
+        self.result_text.tag_config("closed", foreground="#7f8c8d")
+        self.result_text.tag_config("summary", foreground="#2c3e50", font=("Segoe UI", 10, "bold"))
         self.result_text.tag_config("timeout", foreground="#f39c12")
         self.result_text.tag_config("error", foreground="#e74c3c")
+        self.result_text.tag_config("host", foreground="#3498db", font=("Segoe UI", 10, "bold"))
+        self.result_text.tag_config("service", foreground="#9b59b6")
+        self.result_text.tag_config("os", foreground="#e67e22")
 
         # 技术说明区域
         info_frame = tk.Frame(result_card, bg="#ffffff")
@@ -387,7 +394,7 @@ class PortScannerApp:
         status_bar = tk.Frame(self.root, bg="#2c3e50", height=24)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-        self.status_var = tk.StringVar(value="就绪 | 端口扫描模块已初始化")
+        self.status_var = tk.StringVar(value="就绪 | 高级扫描器已初始化")
         status_label = tk.Label(status_bar,
                                 textvariable=self.status_var,
                                 bg="#2c3e50",
@@ -397,109 +404,191 @@ class PortScannerApp:
                                 padx=10)
         status_label.pack(fill=tk.X)
 
-    def add_single_port(self):
-        """添加单个端口到列表"""
-        port_str = self.port_entry.get().strip()
+    def set_preset_ports(self, preset_type):
+        """设置预设端口范围"""
+        if preset_type == "common":
+            self.port_entry.delete(0, tk.END)
+            self.port_entry.insert(0, "21,22,23,25,53,80,110,143,443,445,993,995,3306,3389,8080,8443")
+            self.status_var.set("已设置常用端口")
+        elif preset_type == "web":
+            self.port_entry.delete(0, tk.END)
+            self.port_entry.insert(0, "80,443,8080,8443,8000,8008,8081,8888,9080,9443")
+            self.status_var.set("已设置Web服务端口")
+        elif preset_type == "full":
+            self.port_entry.delete(0, tk.END)
+            self.port_entry.insert(0, "1-65535")
+            self.status_var.set("已设置全端口扫描")
 
-        if not port_str:
-            messagebox.showerror("错误", "请输入端口号")
-            return
+    def parse_targets(self, target_str):
+        """解析目标字符串，支持IP、域名、CIDR网段和逗号分隔"""
+        targets = []
 
-        try:
-            port = int(port_str)
-            if port < 1 or port > 65535:
-                raise ValueError("端口号超出范围")
+        # 处理逗号分隔的目标
+        parts = [part.strip() for part in target_str.split(',') if part.strip()]
 
-            if port not in self.get_port_list():
-                self.port_listbox.insert(tk.END, port)
-                self.port_entry.delete(0, tk.END)
-                self.status_var.set(f"已添加端口: {port}")
-        except ValueError:
-            messagebox.showerror("错误", "请输入有效的端口号 (1-65535)")
+        for part in parts:
+            try:
+                # 检查是否是CIDR网段
+                if '/' in part:
+                    network = ipaddress.ip_network(part, strict=False)
+                    for ip in network.hosts():
+                        targets.append(str(ip))
+                else:
+                    # 检查是否是IP地址
+                    try:
+                        ipaddress.ip_address(part)
+                        targets.append(part)
+                    except ValueError:
+                        # 尝试解析为域名
+                        try:
+                            ips = socket.gethostbyname_ex(part)[2]
+                            targets.extend(ips)
+                        except socket.gaierror:
+                            self.result_text.insert(tk.END, f"[!] 无法解析目标: {part}\n", "error")
+            except Exception as e:
+                self.result_text.insert(tk.END, f"[!] 目标解析错误: {part} - {str(e)}\n", "error")
 
-    def add_port_range(self):
-        """添加端口范围到列表"""
-        port_str = self.port_entry.get().strip()
+        # 去重
+        return list(set(targets))
 
-        if not port_str:
-            messagebox.showerror("错误", "请输入端口范围")
-            return
-
-        # 检查格式是否为 "开始-结束"
-        if '-' not in port_str:
-            messagebox.showerror("错误", "请输入有效的端口范围 (如: 80-100)")
-            return
-
-        try:
-            start, end = port_str.split('-')
-            start_port = int(start.strip())
-            end_port = int(end.strip())
-
-            if start_port < 1 or end_port > 65535 or start_port > end_port:
-                raise ValueError("端口范围无效")
-
-            # 添加范围到列表
-            if f"{start_port}-{end_port}" not in self.port_listbox.get(0, tk.END):
-                self.port_listbox.insert(tk.END, f"{start_port}-{end_port}")
-                self.port_entry.delete(0, tk.END)
-                self.status_var.set(f"已添加端口范围: {start_port}-{end_port}")
-        except ValueError:
-            messagebox.showerror("错误", "请输入有效的端口范围 (如: 80-100)")
-
-    def add_common_ports(self):
-        """添加常用端口到列表"""
-        common_ports = [21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 8080, 8443]
-        existing_ports = self.get_port_list()
-
-        added = False
-        for port in common_ports:
-            if port not in existing_ports:
-                self.port_listbox.insert(tk.END, port)
-                added = True
-
-        if added:
-            self.status_var.set("已添加常用端口")
-        else:
-            messagebox.showinfo("信息", "所有常用端口已在列表中")
-
-    def remove_selected_ports(self):
-        """删除选中的端口"""
-        selected = self.port_listbox.curselection()
-        if not selected:
-            messagebox.showinfo("信息", "请选择要删除的端口")
-            return
-
-        # 从后往前删除，避免索引变化
-        for i in selected[::-1]:
-            port = self.port_listbox.get(i)
-            self.port_listbox.delete(i)
-
-        self.status_var.set(f"已删除 {len(selected)} 个端口")
-
-    def clear_port_list(self):
-        """清空端口列表"""
-        if messagebox.askyesno("确认", "确定要清空所有端口吗？"):
-            count = self.port_listbox.size()
-            self.port_listbox.delete(0, tk.END)
-            self.status_var.set(f"已清空 {count} 个端口")
-
-    def get_port_list(self):
-        """获取要扫描的所有端口列表"""
+    def parse_ports(self, port_str):
+        """解析端口字符串，支持单个端口、范围和逗号分隔"""
         ports = []
-        for item in self.port_listbox.get(0, tk.END):
-            if '-' in str(item):
+
+        # 处理逗号分隔的端口
+        parts = [part.strip() for part in port_str.split(',') if part.strip()]
+
+        for part in parts:
+            if '-' in part:
                 # 处理端口范围
                 try:
-                    start, end = map(int, item.split('-'))
-                    ports.extend(range(start, end + 1))
-                except:
-                    continue
+                    start, end = part.split('-')
+                    start_port = int(start.strip())
+                    end_port = int(end.strip())
+
+                    if start_port < 1 or end_port > 65535 or start_port > end_port:
+                        raise ValueError("无效的端口范围")
+
+                    ports.extend(range(start_port, end_port + 1))
+                except Exception as e:
+                    self.result_text.insert(tk.END, f"[!] 无效的端口范围: {part} - {str(e)}\n", "error")
             else:
+                # 处理单个端口
                 try:
-                    ports.append(int(item))
-                except:
-                    continue
-        return list(set(ports))  # 去重
+                    port = int(part.strip())
+                    if port < 1 or port > 65535:
+                        raise ValueError("端口号超出范围")
+                    ports.append(port)
+                except Exception as e:
+                    self.result_text.insert(tk.END, f"[!] 无效的端口: {part} - {str(e)}\n", "error")
+
+        # 去重
+        return list(set(ports))
+
+    def host_discovery(self, target):
+        """主机发现功能 (Ping扫描)"""
+        try:
+            # 使用系统Ping命令
+            param = "-n 1" if platform.system().lower() == "windows" else "-c 1"
+            command = f"ping {param} {target}"
+            response = os.system(command)
+
+            return response == 0
+        except:
+            # 尝试TCP Ping
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(1)
+                s.connect((target, 80))
+                s.close()
+                return True
+            except:
+                return False
+
+    def detect_service_version(self, target, port):
+        """服务版本探测"""
+        try:
+            # 尝试连接并获取banner
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2)
+            s.connect((target, port))
+
+            # 发送一个简单的探测请求
+            if port == 80 or port == 8080 or port == 443:
+                s.send(b"GET / HTTP/1.0\r\n\r\n")
+            elif port == 21:
+                s.send(b"USER anonymous\r\n")
+            elif port == 22:
+                s.send(b"SSH-2.0-Client\r\n")
+            elif port == 25:
+                s.send(b"EHLO example.com\r\n")
+            elif port == 3306:
+                s.send(b"\x0a")  # MySQL探测
+
+            # 接收响应
+            banner = s.recv(1024).decode(errors='ignore').strip()
+            s.close()
+
+            # 提取服务信息
+            service = socket.getservbyport(port, 'tcp') if port in range(1, 1024) else "unknown"
+
+            # 尝试识别服务类型
+            if "HTTP" in banner or "html" in banner.lower():
+                service = "HTTP"
+            elif "SSH" in banner:
+                service = "SSH"
+            elif "FTP" in banner:
+                service = "FTP"
+            elif "SMTP" in banner:
+                service = "SMTP"
+
+            return f"{service} | {banner[:50]}{'...' if len(banner) > 50 else ''}"
+        except:
+            try:
+                # 回退到端口服务名称
+                return socket.getservbyport(port)
+            except:
+                return "未知服务"
+
+    def detect_os(self, target):
+        """操作系统探测 (简化版)"""
+        try:
+            # 使用TTL值猜测操作系统
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1)
+            s.connect((target, 80))
+            ttl = s.getsockopt(socket.IPPROTO_IP, socket.IP_TTL)
+            s.close()
+
+            if ttl <= 64:
+                return "Linux/Unix"
+            elif ttl <= 128:
+                return "Windows"
+            else:
+                return "其他/未知"
+        except:
+            # 使用默认方法
+            try:
+                # 尝试连接其他端口
+                ports = [22, 25, 53, 443]
+                for port in ports:
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(1)
+                        s.connect((target, port))
+                        ttl = s.getsockopt(socket.IPPROTO_IP, socket.IP_TTL)
+                        s.close()
+
+                        if ttl <= 64:
+                            return "Linux/Unix"
+                        elif ttl <= 128:
+                            return "Windows"
+                    except:
+                        continue
+            except:
+                pass
+
+            return "未知操作系统"
 
     def start_scan(self):
         """开始端口扫描"""
@@ -511,27 +600,26 @@ class PortScannerApp:
             return
 
         # 获取目标地址
-        target = self.target_entry.get().strip()
-        if not target:
+        target_str = self.target_entry.get().strip()
+        if not target_str:
             messagebox.showerror("错误", "请输入目标地址")
             return
 
-        # 验证目标地址
-        try:
-            # 尝试解析域名
-            if not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", target):
-                target = socket.gethostbyname(target)
-
-            # 验证IP地址
-            ipaddress.ip_address(target)
-        except (socket.gaierror, ValueError):
-            messagebox.showerror("错误", "无效的目标地址或域名")
+        # 解析目标
+        targets = self.parse_targets(target_str)
+        if not targets:
+            messagebox.showerror("错误", "未解析到有效的目标地址")
             return
 
-        # 获取端口列表
-        ports = self.get_port_list()
+        # 获取端口
+        port_str = self.port_entry.get().strip()
+        if not port_str:
+            messagebox.showerror("错误", "请输入扫描端口")
+            return
+
+        ports = self.parse_ports(port_str)
         if not ports:
-            messagebox.showerror("错误", "请添加要扫描的端口")
+            messagebox.showerror("错误", "未解析到有效的端口")
             return
 
         # 清空结果
@@ -548,34 +636,57 @@ class PortScannerApp:
         self.stop_scan = False
         self.scan_btn.config(text="停止扫描")
         scan_type = self.scan_type_var.get()
-        self.status_var.set(f"正在扫描 {target} ({scan_type})...")
+        self.current_scan_type = scan_type
+        self.status_var.set(f"正在扫描 {len(targets)} 个目标 ({scan_type})...")
         self.result_stats.config(text=f"扫描中... 0%")
 
         # 获取设置
         timeout = self.timeout_var.get()
         max_threads = self.thread_var.get()
+        host_discovery = self.host_discovery_var.get() == 1
+        service_version = self.service_version_var.get() == 1
+        os_detection = self.os_detection_var.get() == 1
 
         # 创建线程进行扫描
         scan_thread = threading.Thread(
             target=self.scan_ports,
-            args=(target, ports, timeout, max_threads, scan_type),
+            args=(targets, ports, timeout, max_threads, scan_type, host_discovery, service_version, os_detection),
             daemon=True
         )
         scan_thread.start()
 
-    def scan_ports(self, target, ports, timeout, max_threads, scan_type):
-        """端口扫描主函数，支持多种扫描类型"""
+    def scan_ports(self, targets, ports, timeout, max_threads, scan_type, host_discovery, service_version,
+                   os_detection):
+        """端口扫描主函数，支持多种扫描类型和多个目标"""
         open_ports = []
         start_time = datetime.now()
+        total_targets = len(targets)
         total_ports = len(ports)
-        scanned_ports = 0
+        total_tasks = total_targets * total_ports
+        scanned_tasks = 0
+        active_hosts = []
 
         # 工作线程函数
         def worker():
-            nonlocal scanned_ports
-            while port_queue and not self.stop_scan:
-                port = port_queue.pop(0)
+            nonlocal scanned_tasks
+            while task_queue and not self.stop_scan:
+                target, port = task_queue.pop(0)
                 status = ""
+
+                # 如果启用了主机发现且主机不在活动主机列表中，跳过扫描
+                if host_discovery and target not in active_hosts:
+                    # 检查主机是否存活
+                    if self.host_discovery(target):
+                        active_hosts.append(target)
+                        self.root.after(0, self.update_result, target, f"主机发现: {target} 存活", "host")
+                    else:
+                        self.root.after(0, self.update_result, target, f"主机发现: {target} 不存活", "host")
+                        # 跳过该主机的所有端口
+                        for _ in range(total_ports):
+                            if task_queue and task_queue[0][0] == target:
+                                task_queue.pop(0)
+                        scanned_tasks += total_ports
+                        continue
 
                 try:
                     if scan_type == "TCP Connect":
@@ -586,31 +697,54 @@ class PortScannerApp:
                         status = self.tcp_fin_scan(target, port, timeout)
                     elif scan_type == "UDP":
                         status = self.udp_scan(target, port, timeout)
+                    elif scan_type == "快速扫描":
+                        status = self.tcp_syn_scan(target, port, 0.3)
+                    elif scan_type == "全面扫描":
+                        # 全面扫描使用多种技术
+                        if port < 1024:  # 常用端口使用SYN扫描
+                            status = self.tcp_syn_scan(target, port, 0.5)
+                        else:  # 其他端口使用Connect扫描
+                            status = self.tcp_connect_scan(target, port, 1.0)
                 except Exception as e:
                     status = f"错误: {str(e)}"
 
                 if "开放" in status:
-                    open_ports.append(port)
+                    open_ports.append((target, port))
+                    # 服务版本探测
+                    if service_version and "开放" in status:
+                        service_info = self.detect_service_version(target, port)
+                        status = f"{status} | 服务: {service_info}"
 
                 # 更新UI
-                self.root.after(0, self.update_result, port, status)
+                self.root.after(0, self.update_result, target, port, status)
 
                 # 更新计数
-                scanned_ports += 1
+                scanned_tasks += 1
 
                 # 限制UI更新频率
                 current_time = time.time()
                 if current_time - self.last_update > 0.1:  # 每0.1秒更新一次
-                    progress = (scanned_ports / total_ports) * 100
-                    self.root.after(0, self.update_progress, progress, scanned_ports, total_ports, len(open_ports))
+                    progress = (scanned_tasks / total_tasks) * 100
+                    self.root.after(0, self.update_progress, progress, scanned_tasks, total_tasks, len(open_ports))
                     self.last_update = current_time
 
-        # 创建工作线程
-        port_queue = ports.copy()
-        threads = []
+        # 操作系统探测
+        if os_detection:
+            for target in targets:
+                if self.stop_scan:
+                    break
+                os_info = self.detect_os(target)
+                self.root.after(0, self.update_result, target, f"操作系统探测: {os_info}", "os")
 
-        # 创建并启动工作线程
-        for _ in range(min(max_threads, len(ports))):
+        # 创建任务队列
+        task_queue = []
+        for target in targets:
+            for port in ports:
+                task_queue.append((target, port))
+
+        # 创建工作线程
+        threads = []
+        for _ in range(min(max_threads, len(task_queue))):
             t = threading.Thread(target=worker, daemon=True)
             t.start()
             threads.append(t)
@@ -620,7 +754,7 @@ class PortScannerApp:
             t.join()
 
         # 确保进度完成
-        self.root.after(0, self.update_progress, 100, total_ports, total_ports, len(open_ports))
+        self.root.after(0, self.update_progress, 100, total_tasks, total_tasks, len(open_ports))
 
         # 扫描完成
         self.scanning = False
@@ -734,11 +868,18 @@ class PortScannerApp:
     def update_progress(self, progress, scanned, total, open_count):
         """更新进度条和统计信息"""
         self.progress["value"] = progress
-        self.result_stats.config(text=f"扫描进度: {scanned}/{total} 端口 | 开放端口: {open_count}")
+        self.result_stats.config(text=f"扫描进度: {scanned}/{total} | 开放端口: {open_count}")
 
-    def update_result(self, port, status):
+    def update_result(self, target, port, status):
         """更新结果文本框"""
         self.result_text.config(state=tk.NORMAL)
+
+        # 如果是主机发现或OS探测结果
+        if isinstance(port, str):
+            self.result_text.insert(tk.END, f"[*] {target}: {port}\n", "host" if "主机" in port else "os")
+            self.result_text.see(tk.END)
+            self.result_text.config(state=tk.DISABLED)
+            return
 
         # 获取端口服务名称
         try:
@@ -748,16 +889,16 @@ class PortScannerApp:
 
         # 根据状态添加不同颜色的结果
         if "开放" in status:
-            result_line = f"[✓] 端口 {port:<5} 开放 | 服务: {service} ({status})\n"
+            result_line = f"[✓] {target}:{port:<5} 开放 | 服务: {service} ({status})\n"
             self.result_text.insert(tk.END, result_line, "open")
         elif "关闭" in status:
-            result_line = f"[✗] 端口 {port:<5} 关闭\n"
+            result_line = f"[✗] {target}:{port:<5} 关闭\n"
             self.result_text.insert(tk.END, result_line, "closed")
         elif "超时" in status or "过滤" in status:
-            result_line = f"[⌛] 端口 {port:<5} {status}\n"
+            result_line = f"[⌛] {target}:{port:<5} {status}\n"
             self.result_text.insert(tk.END, result_line, "timeout")
         else:
-            result_line = f"[⚠] 端口 {port:<5} {status}\n"
+            result_line = f"[⚠] {target}:{port:<5} {status}\n"
             self.result_text.insert(tk.END, result_line, "error")
 
         # 自动滚动到底部
@@ -773,19 +914,51 @@ class PortScannerApp:
 
         # 添加总结
         self.result_text.config(state=tk.NORMAL)
-        self.result_text.insert(tk.END, "\n" + "=" * 60 + "\n", "summary")
+        self.result_text.insert(tk.END, "\n" + "=" * 80 + "\n", "summary")
         self.result_text.insert(tk.END, "扫描总结:\n", "summary")
-        self.result_text.insert(tk.END, f"- 目标地址: {self.target_entry.get()}\n", "summary")
+        self.result_text.insert(tk.END, f"- 扫描目标: {self.target_entry.get()}\n", "summary")
+        self.result_text.insert(tk.END, f"- 扫描端口: {self.port_entry.get()}\n", "summary")
         self.result_text.insert(tk.END, f"- 扫描类型: {scan_type}\n", "summary")
-        self.result_text.insert(tk.END, f"- 扫描端口数: {len(self.get_port_list())}\n", "summary")
         self.result_text.insert(tk.END, f"- 开放端口数: {len(open_ports)}\n", "summary")
         self.result_text.insert(tk.END, f"- 扫描耗时: {duration.total_seconds():.2f}秒\n", "summary")
-        self.result_text.insert(tk.END, "=" * 60 + "\n", "summary")
+        self.result_text.insert(tk.END, "=" * 80 + "\n", "summary")
         self.result_text.see(tk.END)
         self.result_text.config(state=tk.DISABLED)
 
         # 更新结果统计
         self.result_stats.config(text=f"扫描完成 | 开放端口: {len(open_ports)}")
+
+    def export_results(self):
+        """导出扫描结果到文件"""
+        if not self.result_text.get("1.0", tk.END).strip():
+            messagebox.showwarning("警告", "没有结果可导出")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")],
+            title="保存扫描结果"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write("高级网络安全扫描结果报告\n")
+                f.write("=" * 80 + "\n")
+                f.write(f"扫描时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"扫描目标: {self.target_entry.get()}\n")
+                f.write(f"扫描端口: {self.port_entry.get()}\n")
+                f.write(f"扫描类型: {self.current_scan_type}\n")
+                f.write("\n扫描结果:\n")
+                f.write("=" * 80 + "\n")
+                f.write(self.result_text.get("1.0", tk.END))
+
+            self.status_var.set(f"结果已导出到: {file_path}")
+            messagebox.showinfo("成功", f"扫描结果已保存到:\n{file_path}")
+        except Exception as e:
+            messagebox.showerror("错误", f"导出失败: {str(e)}")
 
 
 if __name__ == "__main__":
