@@ -154,6 +154,109 @@ HTML_TEMPLATE = """
             --text-color: #ffffff;
         }
 
+        .header-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f);
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            position: relative; /* 为绝对定位提供参考 */
+        }
+
+        .header-content {
+            flex: 1; /* 占据剩余空间 */
+            text-align: center;
+            padding: 0 50px; /* 确保两侧有足够空间 */
+        }
+
+        .header-content h1 {
+            font-size: 2.2rem;
+            margin-bottom: 10px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .header-content p {
+            font-size: 1.1rem;
+            margin: 0;
+        }
+
+        .return-button {
+            flex-shrink: 0; /* 防止按钮被压缩 */
+            z-index: 10;
+        }
+
+        /* 扫描状态提示文字样式 */
+        .scan-status-text {
+            color: #ffcc00 !important; /* 亮黄色 */
+            font-weight: bold !important;
+            font-size: 1.2rem !important;
+            animation: pulse 1.5s infinite;
+        }
+
+        /* 系统统计区域样式 */
+        .system-stats {
+            background: rgba(40, 40, 60, 0.8);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+            border: 1px solid rgba(100, 100, 150, 0.5);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+
+            /* 添加Flex布局确保内容居中 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            padding-top: 20px; /* 添加上边距 */
+            padding-bottom: 20px; /* 添加下边距 */
+            /* 其他样式保持不变 */
+        }
+
+        .stats-container {
+            display: flex;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 10px 20px; /* 增加左右内边距 */
+            flex: 1; /* 等分宽度 */
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #4fd1c5;
+            text-shadow: 0 0 8px rgba(79, 209, 197, 0.5);
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #a0aec0;
+            letter-spacing: 1px;
+        }
+
+        /* 添加扫描用时动画效果 */
+        @keyframes pulse-glow {
+            0% { text-shadow: 0 0 5px rgba(79, 209, 197, 0.5); }
+            50% { text-shadow: 0 0 15px rgba(79, 209, 197, 0.8); }
+            100% { text-shadow: 0 0 5px rgba(79, 209, 197, 0.5); }
+        }
+
+        .pulse-animation {
+            animation: pulse-glow 2s infinite;
+        }
+
         body {
             background: linear-gradient(135deg, #1a2a6c, #b21f1f, #1a2a6c);
             color: #fff;
@@ -210,20 +313,26 @@ HTML_TEMPLATE = """
             max-height: 500px;
             overflow-y: auto;
         }
-           .header-section {
-            text-align: center;
-            padding: 50px 0 30px;
-            margin-bottom: 30px;
-            background: var(--header-bg);
-            border-radius: 0 0 20px 20px;
+
+        .header-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f);
+            border-radius: 10px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            margin-top: 10px; /* 添加上边距 */
         }
+
         .header-section h1 {
-            font-size: 2.8rem;
-            margin-bottom: 15px;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
             font-weight: 800;
             letter-spacing: 1px;
             text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            text-align: center; /* 确保标题居中 */
         }
         .status-indicator {
             display: inline-block;
@@ -359,15 +468,21 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <!-- 警告消息框 -->
-        <div class="alert-box alert alert-danger alert-dismissible fade show" role="alert">
-            <strong id="alertMessage">错误消息</strong>
-            <button type="button" class="btn-close" onclick="closeAlert()"></button>
-        </div>
+        <!-- ...（保持不变）... -->
 
-        <!-- 头部区域 -->
+        <!-- 头部区域 - 添加返回按钮 -->
         <div class="header-section">
-            <h1><i class="fas fa-shield-alt"></i> 域名检测</h1>
-            <p>高级域名扫描与IP信息查询工具，帮助您识别潜在的安全威胁</p>
+            <!-- 左侧占位元素保持对称 -->
+            <div style="width: 100px; visibility: hidden;"></div>
+
+            <div class="header-content">
+                <h1><i class="fas fa-shield-alt"></i> 域名检测</h1>
+                <p>高级域名扫描与IP信息查询工具，帮助您识别潜在的安全威胁</p>
+            </div>
+
+            <button class="btn btn-primary return-button" onclick="returnToMain()">
+                <i class="fas fa-home me-2"></i>返回主菜单
+            </button>
         </div>
 
         <div class="row">
@@ -398,28 +513,21 @@ HTML_TEMPLATE = """
                                 <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
                             </div>
                             <div class="pulse"></div>
-                            <div class="mt-2">扫描中，请稍候...</div>
+                            <div class="mt-2 text-white">扫描中，请稍候...</div>
                         </div>
 
                         <div class="system-stats">
-                            <div class="row">
-                                <div class="col-4">
-                                   <div class="text-center">
-                                        <div class="fs-4 text-primary fw-bold" id="subdomainCount">0</div>
-                                        <div class="text-dark fw-bold">子域名</div>
-                                   </div>
+                            <div class="stats-container">
+                                <!-- 子域名统计 -->
+                                <div class="stat-item">
+                                    <div class="stat-value pulse-animation" id="subdomainCount">0</div>
+                                    <div class="stat-label">子域名</div>
                                 </div>
-                                <div class="col-4">
-                                    <div class="text-center">
-                                        <div class="fs-4 text-primary fw-bold" id="scanTime">0s</div>
-                                        <div class="text-dark fw-bold">扫描用时</div>
-                                     </div>
-                                </div>
-                                <div class="col-4">
-                                    <div class="text-center">
-                                        <div class="fs-4 text-primary fw-bold" id="scanTime">0s</div>
-                                        <div class="text-dark fw-bold">扫描用时</div>
-                                    </div>
+
+                                <!-- 扫描用时统计 -->
+                                <div class="stat-item">
+                                    <div class="stat-value" id="scanTime">0s</div>
+                                    <div class="stat-label">扫描用时</div>
                                 </div>
                             </div>
                         </div>
@@ -553,6 +661,24 @@ HTML_TEMPLATE = """
         // 全局状态
         let scanning = false;
 
+    // 添加返回主菜单函数
+        function returnToMain() {
+            // 发送消息给主程序
+            fetch('/return-to-main', {
+                method: 'POST'
+            })
+            .then(response => {
+                if(response.ok) {
+                    // 显示提示信息
+                    alert('请关闭此窗口返回主菜单');
+                }
+            })
+            .catch(error => {
+                console.error('返回主菜单请求失败:', error);
+                alert('返回主菜单请求失败，请手动关闭窗口');
+            });
+        }
+
         function showAlert(message, isError = true) {
             const alertBox = document.querySelector('.alert-box');
             const alertMessage = document.getElementById('alertMessage');
@@ -607,7 +733,7 @@ HTML_TEMPLATE = """
             // 显示扫描动画
             document.getElementById('scanningAnimation').style.display = 'block';
             document.getElementById('resultDomain').textContent = domain;
-            document.getElementById('resultsBody').innerHTML = '<tr><td colspan="5" class="text-center">扫描中，请稍候...</td></tr>';
+            document.getElementById('resultsBody').innerHTML = '<tr><td colspan="5" class="text-center scan-status-text">扫描中，请稍候...</td></tr>';
 
             // 重置计数器
             document.getElementById('subdomainCount').textContent = '0';
@@ -627,6 +753,13 @@ HTML_TEMPLATE = """
             .then(data => {
                 scanning = false;
                 document.getElementById('scanningAnimation').style.display = 'none';
+
+                // 更新统计信息
+                document.getElementById('subdomainCount').textContent = data.subdomains_found;
+                document.getElementById('scanTime').textContent = data.scan_duration;
+
+                // 移除动画效果
+                document.getElementById('subdomainCount').classList.remove('pulse-animation');
 
                 if (data.status === 'error') {
                     showAlert(data.message);
@@ -835,7 +968,17 @@ def query_ip():
         return jsonify({'status': 'error', 'message': f'查询失败: {str(e)}'})
 
 
+# 添加新的路由处理返回主菜单请求
+@app.route('/return-to-main', methods=['POST'])
+def return_to_main():
+    """处理返回主菜单请求"""
+    # 在实际应用中，这里可以添加关闭逻辑
+    # 但因为我们是在主程序中控制，这里只需返回成功响应
+    return jsonify({"status": "success", "message": "请关闭窗口返回主菜单"})
+
+
 # 10. 启动Flask应用
-# 解释：运行Web服务器
+# 解释：运行Web服务器（不自动打开浏览器）
 if __name__ == '__main__':
+    # 启动Flask应用
     app.run(debug=True, port=5000)
