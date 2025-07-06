@@ -690,7 +690,7 @@ HTML_TEMPLATE = """
             alertBox.style.display = 'block';
 
             // 5秒后自动关闭
-            setTimeout(closeAlert, 5000);
+            setTimeout(closeAlert, 5006);
         }
 
         function closeAlert() {
@@ -981,4 +981,4 @@ def return_to_main():
 # 解释：运行Web服务器（不自动打开浏览器）
 if __name__ == '__main__':
     # 启动Flask应用
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5006)
