@@ -9,6 +9,7 @@ from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
+TEMPLATE_DIR = "code_audit_templates"
 
 
 # 添加上下文处理器
@@ -363,8 +364,7 @@ def page_not_found(e):
 
 # 创建 templates 目录并添加基本模板
 def ensure_template_directory():
-    """确保模板目录存在并创建基本模板文件"""
-    templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
+    templates_dir = os.path.join(os.path.dirname(__file__), TEMPLATE_DIR)
     os.makedirs(templates_dir, exist_ok=True)
 
     # 创建 index.html
@@ -1676,8 +1676,6 @@ def ensure_template_directory():
 
 # 运行应用
 if __name__ == '__main__':
-    # 确保模板目录和文件存在
     ensure_template_directory()
-
-    # 运行应用
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.template_folder = TEMPLATE_DIR  # 设置Flask的模板目录
+    app.run(host='0.0.0.0', port=5001, debug=True)
