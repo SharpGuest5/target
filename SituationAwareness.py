@@ -578,7 +578,7 @@ class Config:
         self.rule_file = 'nids_rules.rules'
         self.model_file = 'anomaly_model.joblib'
         self.test_mode = False  # 添加测试模式标志
-        self.web_port = 5000
+        self.web_port = 5006
         self.web_debug = False
         self.web_secret_key = hashlib.sha256(os.urandom(32)).hexdigest()
         self.web_username = "admin"
